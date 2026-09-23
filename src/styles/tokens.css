@@ -1,0 +1,180 @@
+/* =====================================================================
+   CashFlow — Design tokens
+   Todas as cores/medidas centralizadas aqui. Tema claro por padrão,
+   tema escuro via [data-theme="dark"] (definido por theme-boot.js).
+   Paleta de gráficos validada (dataviz validate_palette: CVD ≥ 9.2 / 9.4).
+   ===================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* Superfícies */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f3f4f6;
+  --surface-3: #e9ebef;
+  --surface-inverse: #111827;
+  --overlay: rgba(15, 17, 21, 0.45);
+
+  /* Texto */
+  --text: #111827;
+  --text-2: #6b7280;
+  --text-3: #8b919c;
+  --text-inverse: #f9fafb;
+
+  /* Linhas */
+  --border: rgba(17, 24, 39, 0.08);
+  --border-strong: rgba(17, 24, 39, 0.14);
+  --focus: #16a34a;
+
+  /* Marca */
+  --accent: #22c55e;
+  --accent-hover: #1fb455;
+  --accent-ink: #04210f;
+  --accent-text: #15803d;
+  --accent-soft: rgba(34, 197, 94, 0.12);
+  --accent-soft-2: rgba(34, 197, 94, 0.2);
+
+  /* Semânticas (texto com contraste AA sobre --surface) */
+  --positive: #15803d;
+  --negative: #b91c1c;
+  --warning: #b45309;
+  --info: #1d4ed8;
+  --positive-soft: rgba(22, 163, 74, 0.1);
+  --negative-soft: rgba(220, 38, 38, 0.09);
+  --warning-soft: rgba(217, 119, 6, 0.12);
+  --info-soft: rgba(37, 99, 235, 0.1);
+
+  /* Status (medidores) — sempre acompanhados de rótulo */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+
+  /* Gráficos — ordem categórica fixa validada */
+  --series-1: #1baf7a; /* aqua — Entradas / Contas */
+  --series-2: #eb6834; /* laranja — Saídas / Renda fixa */
+  --series-3: #2a78d6; /* azul — Saldo / Fundos */
+  --series-4: #eda100; /* amarelo */
+  --series-5: #e87ba4; /* magenta */
+  --series-6: #008300; /* verde */
+  --series-7: #4a3aa7; /* violeta */
+  --series-8: #e34948; /* vermelho */
+  --chart-grid: #eceef2;
+  --chart-axis: #c9cdd4;
+  --chart-muted: #8b919c;
+  --chart-track: #eef0f3;
+
+  /* Tipografia */
+  --font: 'DM Sans Variable', 'DM Sans', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --fs-hero: clamp(2.25rem, 1.6rem + 2.4vw, 3.25rem);
+  --fs-display: clamp(1.625rem, 1.3rem + 1.1vw, 2.125rem);
+  --fs-xl: 1.375rem;
+  --fs-lg: 1.125rem;
+  --fs-md: 0.9375rem;
+  --fs-sm: 0.8125rem;
+  --fs-xs: 0.75rem;
+  --fs-2xs: 0.6875rem;
+
+  /* Espaçamento — base 4/8 */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 28px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* Raios */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-full: 999px;
+
+  /* Sombras extremamente discretas */
+  --shadow-1: 0 1px 2px rgba(17, 24, 39, 0.04), 0 1px 1px rgba(17, 24, 39, 0.02);
+  --shadow-2: 0 6px 20px -6px rgba(17, 24, 39, 0.1), 0 2px 6px rgba(17, 24, 39, 0.04);
+  --shadow-3: 0 24px 60px -12px rgba(17, 24, 39, 0.25);
+
+  /* Movimento */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 120ms;
+  --t-med: 200ms;
+  --t-slow: 320ms;
+
+  /* Layout */
+  --sidebar-w: 256px;
+  --sidebar-rail-w: 76px;
+  --header-h: 68px;
+  --bottom-nav-h: 64px;
+  --content-max: 1560px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #0f1115;
+  --surface: #171a21;
+  --surface-2: #1d2129;
+  --surface-3: #262b35;
+  --surface-inverse: #f3f4f6;
+  --overlay: rgba(0, 0, 0, 0.6);
+
+  --text: #f3f4f6;
+  --text-2: #a1a7b3;
+  --text-3: #7c8390;
+  --text-inverse: #111827;
+
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --focus: #4ade80;
+
+  --accent: #22c55e;
+  --accent-hover: #34d06c;
+  --accent-ink: #04210f;
+  --accent-text: #4ade80;
+  --accent-soft: rgba(34, 197, 94, 0.14);
+  --accent-soft-2: rgba(34, 197, 94, 0.22);
+
+  --positive: #4ade80;
+  --negative: #f87171;
+  --warning: #fbbf24;
+  --info: #7aa7ff;
+  --positive-soft: rgba(74, 222, 128, 0.12);
+  --negative-soft: rgba(248, 113, 113, 0.12);
+  --warning-soft: rgba(251, 191, 36, 0.12);
+  --info-soft: rgba(122, 167, 255, 0.12);
+
+  --series-1: #199e70;
+  --series-2: #d95926;
+  --series-3: #3987e5;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --chart-grid: #232833;
+  --chart-axis: #353b48;
+  --chart-muted: #7c8390;
+  --chart-track: #232833;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 8px 24px -8px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.25);
+  --shadow-3: 0 24px 60px -12px rgba(0, 0, 0, 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-med: 0ms;
+    --t-slow: 0ms;
+  }
+}

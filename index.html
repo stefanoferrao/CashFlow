@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR" data-theme-pref="system">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- CSP -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#F6F7F9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0F1115" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="CashFlow — veja em um só lugar onde está o seu dinheiro. Dados da Pluggy, processados somente no seu navegador." />
+    <title>CashFlow</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <!-- Aplica o tema antes da primeira pintura (evita "flash" do tema errado). Arquivo local, sem dados sensíveis. -->
+    <script src="./theme-boot.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Pular para o conteúdo</a>
+    <div id="app" aria-live="off">
+      <div class="boot" role="status" aria-label="Carregando">
+        <div class="boot__logo" aria-hidden="true"></div>
+      </div>
+    </div>
+    <div id="toasts" class="toasts" role="region" aria-live="polite" aria-label="Notificações"></div>
+    <div id="modal-root"></div>
+    <noscript>O CashFlow precisa de JavaScript habilitado.</noscript>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

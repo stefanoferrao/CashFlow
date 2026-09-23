@@ -1,0 +1,32 @@
+{
+  "name": "cashflow",
+  "private": true,
+  "version": "1.0.0",
+  "description": "CashFlow — plataforma pessoal de gestão financeira sobre a Pluggy, 100% frontend (sem backend próprio).",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:all": "npm run typecheck && npm run test && npm run build && npm run test:e2e"
+  },
+  "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.2.0",
+    "chart.js": "4.5.1",
+    "gridstack": "13.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "typescript": "~6.0.3",
+    "vite": "^7.1.0",
+    "vitest": "^3.2.4"
+  }
+}
