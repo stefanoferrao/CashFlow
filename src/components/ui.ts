@@ -3,6 +3,7 @@
  */
 import { type AppCategoryId, CATEGORY_BY_ID, type NormalizedInstitution } from '../models/finance';
 import { initialsOf, isHexColor, readableTextOn } from '../services/institutions';
+import { isFullBleedLogo } from '../services/bankIcons';
 import { formatMoney, formatPercent, formatSignedMoney } from '../utils/format';
 import { html, type SafeHtml } from './dom';
 import { icon } from './icons';
@@ -118,13 +119,14 @@ export type InstLike = Pick<NormalizedInstitution, 'name' | 'imageUrl' | 'primar
  * Identidade visual da instituição: logo da Pluggy, ícone ou iniciais sobre a cor escolhida.
  * Decorativo (o nome sempre acompanha). Se o logo não carregar, as iniciais aparecem (ver app.ts).
  */
-export function instLogo(inst: InstLike, size: 'lg' | 'md' | 'sm' | 'xs' = 'md'): SafeHtml {
+export function instLogo(inst: InstLike, size: 'xl' | 'lg' | 'md' | 'sm' | 'xs' = 'md'): SafeHtml {
   const color = isHexColor(inst.primaryColor) ? inst.primaryColor : null;
   const fg = inst.textColor ?? (color ? readableTextOn(color) : null);
   const initials = inst.initials ?? initialsOf(inst.name);
   const cls = `inst-logo inst-logo--${size}`;
   if (inst.imageUrl && inst.logo !== 'initials' && inst.logo !== 'icon') {
-    return html`<span class="${cls} inst-logo--img" aria-hidden="true">
+    // Ícones da biblioteca local e imagens enviadas já têm fundo próprio: ocupam toda a área.
+    return html`<span class="${cls} inst-logo--img${isFullBleedLogo(inst.imageUrl) ? ' inst-logo--bleed' : ''}" aria-hidden="true">
       <img src="${inst.imageUrl}" alt="" loading="lazy" referrerpolicy="no-referrer" />
       <span class="inst-logo__fallback" style="${color ? `background:${color};color:${fg}` : ''}">${initials}</span>
     </span>`;

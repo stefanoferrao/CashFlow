@@ -13,6 +13,7 @@ import {
   type InstitutionIdentity,
   type NetWorthSnapshot,
   type PlannedEntry,
+  type ProductLogo,
   type UserCategorization,
   type UserLabels,
   emptyCategorization,
@@ -32,6 +33,7 @@ import { CategoryResolver } from '../services/categories';
 import { buildDemoDataset } from '../services/demoData';
 import { createSnapshot, calculateNetWorth, upsertSnapshot } from '../services/financialCalculator';
 import { applyIdentities, isHexColor, toHexColor, validDay } from '../services/institutions';
+import { bankIcon, isAllowedLogoUrl, isLocalIconUrl, isUploadedLogo } from '../services/bankIcons';
 import { type NormalizedItemData, mergeItemData, normalizeBundle, normalizeItem } from '../services/financialDataService';
 import { deleteDatabase, isPersistent } from '../storage/db';
 import {
@@ -239,6 +241,7 @@ export async function unlockVault(passphrase: string): Promise<void> {
   });
   const stale = await loadCache();
   if (hasCredentials && store.state.itemIds.length && stale && store.state.online) void syncAll();
+  else if (hasCredentials) void ensureConnectors();
 }
 
 export function lockApp(reason: 'manual' | 'inactivity' = 'manual'): void {
@@ -284,6 +287,13 @@ export async function wipeAllLocalData(): Promise<void> {
   try {
     localStorage.removeItem('cashflow.theme');
     sessionStorage.clear();
+  } catch {
+    /* ignore */
+  }
+  // Logos guardados pelo app instalado indicam quais instituições apareceram na tela: também saem.
+  // (Os arquivos do próprio app ficam, para ele continuar abrindo offline.)
+  try {
+    if ('caches' in window) await Promise.all(['cashflow-banks-v1', 'cashflow-logos-v1'].map((k) => caches.delete(k)));
   } catch {
     /* ignore */
   }
@@ -592,12 +602,16 @@ export async function removeItemLocally(itemId: string): Promise<void> {
   const ds = store.state.baseDataset;
   const ownIds = new Set([...ds.accounts, ...ds.cards].filter((x) => x.itemId === itemId).map((x) => x.id));
   const cur = store.state.labels;
-  if (cur.identities[itemId] || [...ownIds].some((id) => cur.nicknames[id] || cur.cardCycles[id])) {
+  if (cur.identities[itemId] || [...ownIds].some((id) => cur.nicknames[id] || cur.cardCycles[id] || cur.productLogos[id])) {
     const identities = { ...cur.identities };
     delete identities[itemId];
-    const nicknames = Object.fromEntries(Object.entries(cur.nicknames).filter(([id]) => !ownIds.has(id)));
-    const cardCycles = Object.fromEntries(Object.entries(cur.cardCycles).filter(([id]) => !ownIds.has(id)));
-    await secureRepo.put('categories', 'labels', { identities, nicknames, cardCycles } satisfies UserLabels);
+    const keep = <T>(rec: Record<string, T>) => Object.fromEntries(Object.entries(rec).filter(([id]) => !ownIds.has(id)));
+    await secureRepo.put('categories', 'labels', {
+      identities,
+      nicknames: keep(cur.nicknames),
+      cardCycles: keep(cur.cardCycles),
+      productLogos: keep(cur.productLogos),
+    } satisfies UserLabels);
   }
   await loadCache();
   notify('success', 'Instituição removida deste navegador', 'Para revogar o acesso de fato, remova o item no Dashboard da Pluggy ou no Meu Pluggy.');
@@ -619,35 +633,60 @@ export async function clearFinancialCache(): Promise<void> {
 
 const CONNECTORS_TTL_MS = 7 * 24 * 3600_000;
 
+export interface CatalogResult {
+  ok: boolean;
+  /** Motivo amigável quando não foi possível obter o catálogo. */
+  message?: string;
+}
+
 /**
- * Catálogo de conectores da Pluggy (GET /connectors) — dá logo e cor oficiais às instituições,
- * inclusive às detectadas em conexões do Meu Pluggy. Cache cifrado de 7 dias; falhas são silenciosas.
+ * Catálogo de conectores da Pluggy (GET /connectors) — logo e cor oficiais para instituições que não estão
+ * na biblioteca local de ícones. Cache cifrado de 7 dias. Chamado ao desbloquear, após sincronizar e
+ * sob demanda na personalização (com mensagem de erro visível).
  */
-export async function ensureConnectors(force = false): Promise<void> {
-  if (store.state.mode !== 'real' || !vault.isUnlocked() || !store.state.connection.hasCredentials) return;
+export async function ensureConnectors(force = false): Promise<CatalogResult> {
+  if (store.state.mode !== 'real') return { ok: false, message: 'No modo demonstração o catálogo da Pluggy não é usado.' };
+  if (!vault.isUnlocked() || !store.state.connection.hasCredentials) return { ok: false, message: 'Configure as credenciais da Pluggy para usar o catálogo.' };
   const cached = await secureRepo.get<ConnectorInfo[]>('categories', 'connectors');
   if (!force && cached && !cached.expired && cached.value.length) {
     if (!store.state.connectors.length) setData({ connectors: cached.value });
-    return;
+    return { ok: true };
   }
-  if (!store.state.online) return;
-  try {
-    const list = await getClient().getConnectors();
-    const info: ConnectorInfo[] = list
-      .filter((c) => typeof c.id === 'number' && typeof c.name === 'string')
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        imageUrl: typeof c.imageUrl === 'string' && /^https:\/\//.test(c.imageUrl) ? c.imageUrl : null,
-        primaryColor: toHexColor(c.primaryColor ?? null),
-        type: c.type ?? null,
-        isOpenFinance: !!c.isOpenFinance,
-      }));
-    await secureRepo.put('categories', 'connectors', info, CONNECTORS_TTL_MS);
-    setData({ connectors: info });
-  } catch (e) {
-    debugLog('connectors', 'catálogo indisponível', toPluggyError(e).kind);
+  if (!store.state.online) {
+    if (cached?.value.length && !store.state.connectors.length) setData({ connectors: cached.value });
+    return { ok: !!cached?.value.length, message: 'Sem conexão com a internet.' };
   }
+  const client = getClient();
+  let list: Awaited<ReturnType<typeof client.getConnectors>> = [];
+  let lastErr: unknown = null;
+  // Alguns ambientes recusam o filtro por país; tenta sem ele antes de desistir.
+  for (const country of [true, false]) {
+    try {
+      list = await client.getConnectors(country);
+      if (list.length) break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!list.length) {
+    const err = lastErr ? toPluggyError(lastErr) : null;
+    debugLog('connectors', 'catálogo indisponível', err?.kind ?? 'vazio');
+    if (cached?.value.length && !store.state.connectors.length) setData({ connectors: cached.value });
+    return { ok: !!cached?.value.length, message: err ? `${err.title}: ${err.message}` : 'A Pluggy não retornou instituições.' };
+  }
+  const info: ConnectorInfo[] = list
+    .filter((c) => typeof c.id === 'number' && typeof c.name === 'string')
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      imageUrl: typeof c.imageUrl === 'string' && /^https:\/\/[^\s"'<>]+$/.test(c.imageUrl) ? c.imageUrl : null,
+      primaryColor: toHexColor(c.primaryColor ?? null),
+      type: c.type ?? null,
+      isOpenFinance: !!c.isOpenFinance,
+    }));
+  await secureRepo.put('categories', 'connectors', info, CONNECTORS_TTL_MS);
+  setData({ connectors: info });
+  return { ok: true };
 }
 
 async function saveLabels(labels: UserLabels): Promise<void> {
@@ -658,23 +697,39 @@ async function saveLabels(labels: UserLabels): Promise<void> {
 function cleanIdentity(i: InstitutionIdentity): InstitutionIdentity | null {
   const name = i.name.trim().slice(0, 40);
   if (!name) return null;
-  const imageUrl = i.imageUrl && /^https:\/\//.test(i.imageUrl) ? i.imageUrl : null;
+  const bank = bankIcon(i.bank)?.slug ?? null;
+  const imageUrl = !bank && isAllowedLogoUrl(i.imageUrl) && !isLocalIconUrl(i.imageUrl) ? i.imageUrl : null;
+  const hasImage = !!(bank || imageUrl);
   return {
     name,
     color: isHexColor(i.color) ? i.color.toUpperCase() : '#64748B',
-    logo: i.logo === 'image' && !imageUrl ? 'initials' : i.logo,
+    logo: i.logo === 'image' && !hasImage ? 'initials' : i.logo,
     icon: i.logo === 'icon' ? i.icon : null,
-    connectorId: imageUrl ? i.connectorId : null,
+    connectorId: imageUrl && /^https:/.test(imageUrl) ? i.connectorId : null,
     imageUrl,
+    bank,
     updatedAt: new Date().toISOString(),
   };
+}
+
+function cleanProductLogo(p: ProductLogo | null): ProductLogo | null {
+  if (!p) return null;
+  if (p.inherit) return { bank: null, imageUrl: null, inherit: true };
+  const bank = bankIcon(p.bank)?.slug ?? null;
+  const imageUrl = !bank && isUploadedLogo(p.imageUrl) ? p.imageUrl : null;
+  return bank || imageUrl ? { bank, imageUrl } : null;
 }
 
 /**
  * Salva a personalização de uma conexão: identidade (null = voltar ao automático)
  * e apelidos das contas/cartões dela (string vazia = remover apelido).
  */
-export async function saveInstitutionCustomization(itemId: string, identity: InstitutionIdentity | null, nicknames: Record<string, string>): Promise<void> {
+export async function saveInstitutionCustomization(
+  itemId: string,
+  identity: InstitutionIdentity | null,
+  nicknames: Record<string, string>,
+  productLogos: Record<string, ProductLogo | null> = {},
+): Promise<void> {
   const cur = store.state.labels;
   const identities = { ...cur.identities };
   const clean = identity ? cleanIdentity(identity) : null;
@@ -686,7 +741,13 @@ export async function saveInstitutionCustomization(itemId: string, identity: Ins
     if (v) nick[id] = v;
     else delete nick[id];
   }
-  await saveLabels({ ...cur, identities, nicknames: nick });
+  const logos = { ...cur.productLogos };
+  for (const [id, value] of Object.entries(productLogos)) {
+    const v = cleanProductLogo(value);
+    if (v) logos[id] = v;
+    else delete logos[id];
+  }
+  await saveLabels({ ...cur, identities, nicknames: nick, productLogos: logos });
   notify('success', 'Personalização salva', 'O novo nome e a aparência já valem em todo o app.');
 }
 

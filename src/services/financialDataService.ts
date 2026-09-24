@@ -211,8 +211,10 @@ export function normalizeTransaction(tx: PluggyTransaction, ctx: TxContext): Nor
     providerCategory: resolved.providerLabel,
     providerCategoryId: tx.categoryId ?? null,
     installment,
+    purchaseDate: installment ? apiDateToKey(ccm?.purchaseDate) : null,
     billId: ccm?.billId ?? null,
-    billForecast: ccm?.billForecastDate && /^\d{4}-\d{2}$/.test(ccm.billForecastDate) ? ccm.billForecastDate : null,
+    // 'YYYY-MM' (aceita também 'YYYY-MM-DD' / ISO, usando só o mês).
+    billForecast: ccm?.billForecastDate && /^\d{4}-\d{2}/.test(ccm.billForecastDate) ? ccm.billForecastDate.slice(0, 7) : null,
     merchant: tx.merchant?.name ?? tx.merchant?.businessName ?? null,
     paymentMethod: tx.paymentData?.paymentMethod ?? null,
     ignored: false,

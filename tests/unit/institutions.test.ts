@@ -18,6 +18,7 @@ import {
   evidenceFor,
 } from '../../src/services/institutions';
 import { nextDayOfMonth } from '../../src/utils/dates';
+import { BANK_ICONS, bankIcon, isAllowedLogoUrl, productIconFor, searchBankIcons } from '../../src/services/bankIcons';
 import { account, card, investment, tx } from './fixtures';
 
 const MEU_PLUGGY = 200;
@@ -155,9 +156,8 @@ describe('nome do titular não é guardado como nome de conta/cartão', () => {
   });
 });
 
-describe('aplicação das identidades no dataset', () => {
-  function meuPluggyDataset(): FinancialDataset {
-    const ds = emptyDataset('pluggy');
+function meuPluggyDataset(): FinancialDataset {
+  const ds = emptyDataset('pluggy');
     ds.items = [item('it-nu', MEU_PLUGGY, 'MeuPluggy'), item('it-x', MEU_PLUGGY, 'MeuPluggy'), item('it-direct', 201, 'Banco Direto', { primaryColor: '#0F766E' })];
     ds.accounts = [
       account({ id: 'a-nu', itemId: 'it-nu', institution: 'MeuPluggy', name: 'Nu Pagamentos S.A. - Instituição de Pagamento' }),
@@ -168,16 +168,21 @@ describe('aplicação das identidades no dataset', () => {
     ds.transactions = [tx({ itemId: 'it-nu', institution: 'MeuPluggy', accountId: 'a-nu' })];
     ds.investments = [investment({ id: 'i-nu', itemId: 'it-nu', institution: 'MeuPluggy', name: 'CDB - NU FINANCEIRA S.A.' })];
     return ds;
-  }
+}
 
-  it('detecta, usa logo/cor do catálogo e aplica em contas, transações e investimentos', () => {
+describe('aplicação das identidades no dataset', () => {
+
+  it('detecta, usa o ícone local (sem terceiros) e a cor, e aplica em contas, transações e investimentos', () => {
     const out = applyIdentities(meuPluggyDataset(), emptyLabels(), CATALOG);
     const nu = out.items.find((i) => i.id === 'it-nu')!.institution;
     expect(nu.name).toBe('Nubank');
     expect(nu.identitySource).toBe('detected');
     expect(nu.via).toBe('Meu Pluggy');
-    expect(nu.imageUrl).toBe(CATALOG[0]!.imageUrl);
+    expect(nu.imageUrl).toBe('./banks/nubank.svg');
     expect(nu.primaryColor).toBe('#820AD1');
+    // Sem ícone local para a instituição, o logo do catálogo da Pluggy continua valendo.
+    const noLocal = applyIdentities(meuPluggyDataset(), emptyLabels(), []);
+    expect(noLocal.items.find((i) => i.id === 'it-nu')!.institution.imageUrl).toBe('./banks/nubank.svg');
     const acc = out.accounts.find((a) => a.id === 'a-nu')!;
     expect(acc.institution).toBe('Nubank');
     expect(acc.name).toBe('Conta corrente');
@@ -251,14 +256,70 @@ describe('fechamento e vencimento definidos pelo usuário', () => {
     expect(cycle.due).toBe('2026-10-05');
   });
 
-  it('datas informadas pela instituição têm prioridade', () => {
+  it('dias definidos pelo usuário têm prioridade sobre as datas da instituição', () => {
     const cycle = getCardCycle(card({ manualClosingDay: 10, manualDueDay: 17 }), [], '2026-09-15')!;
-    expect(cycle.closing).toBe('2026-09-28');
-    expect(cycle.due).toBe('2026-10-05');
-    expect(cycle.source).toBe('institution');
+    expect(cycle.closing).toBe('2026-10-10');
+    expect(cycle.due).toBe('2026-10-17');
+    expect(cycle.source).toBe('user');
+    // Sem dias do usuário, valem as da instituição.
+    const inst = getCardCycle(card(), [], '2026-09-15')!;
+    expect(inst.closing).toBe('2026-09-28');
+    expect(inst.source).toBe('institution');
+  });
+
+  it('só o fechamento definido: vencimento segue o intervalo informado pela instituição', () => {
+    const cycle = getCardCycle(card({ closingDate: '2026-09-28', dueDate: '2026-10-05', manualClosingDay: 1 }), [], '2026-09-15')!;
+    expect(cycle.closing).toBe('2026-10-01');
+    expect(cycle.due).toBe('2026-10-08');
   });
 
   it('sem datas e sem dias definidos → sem ciclo (nada é inventado)', () => {
     expect(getCardCycle(card({ closingDate: null, dueDate: null }), [], '2026-09-23')).toBeNull();
+  });
+});
+
+describe('biblioteca local de ícones (react-bancos)', () => {
+  it('tem os bancos pedidos e busca por nome, código COMPE e produto', () => {
+    for (const slug of ['nubank', 'inter', 'banrisul', 'xp', 'c6bank', 'itau', 'bradesco', 'btgpactual', 'nubankultravioleta']) {
+      expect(bankIcon(slug)?.slug).toBe(slug);
+    }
+    expect(BANK_ICONS.length).toBeGreaterThan(200);
+    expect(searchBankIcons('inter')[0]!.slug).toBe('inter');
+    expect(searchBankIcons('077')[0]!.slug).toBe('inter');
+    expect(searchBankIcons('ultravioleta').map((b) => b.slug)).toContain('nubankultravioleta');
+    expect(searchBankIcons('banrisul').map((b) => b.slug)).toContain('banrisulinfinite');
+  });
+
+  it('só aceita URLs de logo seguras', () => {
+    expect(isAllowedLogoUrl('./banks/nubank.svg')).toBe(true);
+    expect(isAllowedLogoUrl('./banks/nao-existe.svg')).toBe(false);
+    expect(isAllowedLogoUrl('https://cdn.pluggy.ai/x.svg')).toBe(true);
+    expect(isAllowedLogoUrl('http://exemplo.com/x.svg')).toBe(false);
+    expect(isAllowedLogoUrl('javascript:alert(1)')).toBe(false);
+    expect(isAllowedLogoUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(true);
+    expect(isAllowedLogoUrl('data:image/svg+xml;base64,PHN2Zz4=')).toBe(false);
+  });
+
+  it('reconhece o produto do cartão pelo nome ou nível quando o banco é conhecido', () => {
+    expect(productIconFor('nubank', 'Ultravioleta Mastercard Black')?.slug).toBe('nubankultravioleta');
+    expect(productIconFor('nubank', 'croma-platinum')?.slug).toBe('nubankcroma');
+    expect(productIconFor('banrisul', 'VISA INFINITE')?.slug).toBe('banrisulinfinite');
+    expect(productIconFor('c6bank', 'C6 Carbon')?.slug).toBe('c6carbon');
+    expect(productIconFor('inter', 'Mastercard Gold')).toBeNull();
+    expect(productIconFor(null, 'Ultravioleta')).toBeNull();
+  });
+
+  it('cartão ganha o logo do produto; o usuário pode escolher outro ou manter o da instituição', () => {
+    const ds = meuPluggyDataset();
+    const labels = { ...emptyLabels(), identities: { 'it-x': { name: 'Nubank', color: '#820AD1', logo: 'image' as const, icon: null, connectorId: null, imageUrl: null, bank: 'nubank', updatedAt: '' } } };
+    const auto = applyIdentities(ds, labels, []).cards.find((c) => c.id === 'c-x')!;
+    expect(auto.logoSource).toBe('detected');
+    expect(auto.logo?.imageUrl).toBe('./banks/nubankcroma.svg');
+    const chosen = applyIdentities(ds, { ...labels, productLogos: { 'c-x': { bank: 'nubankultravioleta', imageUrl: null } } }, []).cards.find((c) => c.id === 'c-x')!;
+    expect(chosen.logoSource).toBe('user');
+    expect(chosen.logo?.name).toBe('Nubank Ultravioleta');
+    const inherit = applyIdentities(ds, { ...labels, productLogos: { 'c-x': { bank: null, imageUrl: null, inherit: true } } }, []).cards.find((c) => c.id === 'c-x')!;
+    expect(inherit.logo).toBeNull();
+    expect(inherit.institutionColor).toBe('#820AD1');
   });
 });

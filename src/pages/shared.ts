@@ -4,13 +4,13 @@
 import { html, type SafeHtml } from '../components/dom';
 import { icon } from '../components/icons';
 import { openModal } from '../components/modal';
-import { instName, stateBlock } from '../components/ui';
+import { type InstLike, instName, stateBlock } from '../components/ui';
 import { computeAnalytics, type Analytics } from '../services/analytics';
 import * as actions from '../state/actions';
 import { notify } from '../state/notify';
 import { store, type AppState } from '../state/store';
 import { toPluggyError } from '../pluggy/errors';
-import type { InvestmentClass, NormalizedInstitution } from '../models/finance';
+import type { InvestmentClass, LogoView, NormalizedInstitution } from '../models/finance';
 
 /** Índice da paleta por entidade (fixo — a cor segue a entidade, nunca a posição/ranking). */
 export const CLASS_COLOR: Record<'contas' | InvestmentClass, number> = { contas: 1, renda_fixa: 2, fundos: 3, acoes: 4, etfs: 5, previdencia: 6, outros: 7 };
@@ -43,6 +43,11 @@ export function institutionOf(itemId: string, s: AppState = store.state): Normal
     instCache.set(s.dataset.items, map);
   }
   return map.get(itemId) ?? null;
+}
+
+/** Logo de uma conta/cartão: o próprio (ex.: "Nubank Ultravioleta") ou o da instituição. */
+export function logoOf(product: { itemId: string; institution: string; institutionColor?: string | null; logo?: LogoView | null }, s: AppState = store.state): InstLike {
+  return product.logo ?? institutionOf(product.itemId, s) ?? { name: product.institution, imageUrl: null, primaryColor: product.institutionColor ?? null };
 }
 
 /** Logo + nome da instituição de um Item (fallback: só o nome). */

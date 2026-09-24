@@ -16,10 +16,11 @@ import { store } from '../state/store';
 import { clearLayout, exportVisualConfig, importVisualConfig, type ThemePref } from '../storage/preferences';
 import { isPersistent } from '../storage/db';
 import { formatDateTime, formatRelative } from '../utils/format';
-import { commonHandlers, openAddInstitution } from './shared';
+import { commonHandlers, logoOf, openAddInstitution } from './shared';
 import { itemStatusBadge } from './accounts';
 import { dayOptions, institutionDatesText } from './identity';
 import type { PageContext } from '../router';
+import { installState, onInstallStateChange, promptInstall } from '../pwa';
 
 const SECTIONS: Array<[string, string]> = [
   ['conta', 'Conta'],
@@ -27,6 +28,7 @@ const SECTIONS: Array<[string, string]> = [
   ['cartoes', 'Cartões'],
   ['seguranca', 'Segurança'],
   ['aparencia', 'Aparência'],
+  ['aplicativo', 'Aplicativo'],
   ['dashboard', 'Dashboard'],
   ['dados', 'Dados locais'],
   ['sobre', 'Sobre'],
@@ -117,14 +119,13 @@ export function mount(ctx: PageContext): () => void {
 
           <section class="card settings-section" id="set-cartoes">
             <div class="card__title card__title--lg">${icon('card')}Cartões de crédito</div>
-            <p class="muted" style="font-size:13px;margin-top:8px">Quando a instituição não informa o fechamento e o vencimento da fatura, defina os dias aqui. Eles passam a valer na fatura atual, na previsão de fechamento, no melhor dia de compra e no saldo projetado. Datas informadas pela instituição têm prioridade.</p>
+            <p class="muted" style="font-size:13px;margin-top:8px">Defina os dias de fechamento e vencimento quando a instituição não informa ou informa datas que não batem com a sua fatura. Os dias definidos aqui têm prioridade e valem na fatura atual, nas próximas faturas, no melhor dia de compra e no saldo projetado.</p>
             ${ds.cards.length
               ? ds.cards.map((card) => {
-                  const it = ds.items.find((i) => i.id === card.itemId);
                   const both = !!(card.closingDate && card.dueDate);
                   return html`<div class="setting-row">
                     <div class="setting-row__text">
-                      <strong class="inst-name">${instLogo(it?.institution ?? { name: card.institution, imageUrl: null, primaryColor: card.institutionColor }, 'xs')}<span class="inst-name__text">${card.label ?? card.name}${card.lastFourDigits ? ` · final ${card.lastFourDigits}` : ''}</span></strong>
+                      <strong class="inst-name">${instLogo(logoOf(card), 'xs')}<span class="inst-name__text">${card.label ?? card.name}${card.lastFourDigits ? ` · final ${card.lastFourDigits}` : ''}</span></strong>
                       <span>${institutionDatesText(card)}</span>
                     </div>
                     <div class="row wrap">
@@ -150,6 +151,25 @@ export function mount(ctx: PageContext): () => void {
             ${row('Tema', 'Claro, escuro ou seguir o sistema.', segmented('theme', [{ value: 'light', label: '☀️ Claro' }, { value: 'dark', label: '🌙 Escuro' }, { value: 'system', label: 'Sistema' }], s.theme.pref, 'Tema'))}
             ${row('Ocultar valores', 'Desfoca valores monetários na tela (útil em locais públicos).', html`<label class="switch"><input type="checkbox" data-change="hide-values" ${s.preferences.hideValues ? 'checked' : ''} /><span class="switch__track"></span><span class="sr-only">Ocultar valores</span></label>`)}
             ${row('Incluir estimativas', 'Usar recorrências detectadas no histórico em receitas/despesas previstas e no saldo projetado.', html`<label class="switch"><input type="checkbox" data-change="estimates" ${s.preferences.includeEstimates ? 'checked' : ''} /><span class="switch__track"></span><span class="sr-only">Incluir estimativas</span></label>`)}
+          </section>
+
+          <section class="card settings-section" id="set-aplicativo">
+            <div class="card__title card__title--lg">${icon('phone')}Aplicativo</div>
+            ${(() => {
+              const st = installState();
+              if (st === 'installed') return row('CashFlow instalado', 'Você está usando o aplicativo. Ele abre em janela própria, sem barra do navegador.', badge('Instalado', 'good', 'check'));
+              if (st === 'available')
+                return row('Instalar o CashFlow', 'Instale como aplicativo no celular ou no computador: ícone na tela inicial, janela própria e abertura mesmo sem internet.', html`<button type="button" class="btn btn--primary btn--sm" data-action="install-app">${icon('phone')}Instalar aplicativo</button>`);
+              if (st === 'ios')
+                return row(
+                  'Instalar no iPhone ou iPad',
+                  html`No <strong>Safari</strong>, toque em <span class="inline-note">${icon('share')}<strong>Compartilhar</strong></span> e depois em <strong>Adicionar à Tela de Início</strong>. O CashFlow passa a abrir como aplicativo.`,
+                  '',
+                );
+              return row('Instalar o CashFlow', 'Abra este endereço no Chrome ou Edge (Android, Windows, macOS, Linux) ou no Safari (iPhone/iPad) para instalar como aplicativo. O endereço precisa ser https (ou localhost).', '');
+            })()}
+            ${row('Funciona sem internet', 'Depois da primeira abertura, o app abre mesmo offline e mostra os dados já baixados (cifrados neste aparelho). Sincronizar com a Pluggy exige internet.', badge(s.online ? 'Online' : 'Offline', s.online ? 'good' : 'warn'))}
+            ${row('Privacidade', 'O modo aplicativo guarda só os arquivos do CashFlow e os logos das instituições. Credenciais e dados financeiros continuam apenas no cofre cifrado deste aparelho.', '')}
           </section>
 
           <section class="card settings-section" id="set-dashboard">
@@ -183,7 +203,7 @@ export function mount(ctx: PageContext): () => void {
           <section class="card settings-section" id="set-sobre">
             <div class="card__title card__title--lg">${icon('info')}Sobre</div>
             ${row(`${APP_CONFIG.name} ${APP_CONFIG.version}`, 'Aplicação 100% frontend sobre a API da Pluggy. Sem backend próprio, sem analytics, sem telemetria.', html`<a class="btn btn--ghost btn--sm" href="#/privacidade">${icon('shield')}Privacidade</a>`)}
-            ${row('Bibliotecas', 'Chart.js 4.5.1 (MIT) · GridStack 13.3.0 (MIT) · DM Sans (OFL) · Vite (MIT, apenas build).', '')}
+            ${row('Bibliotecas', html`Chart.js 4.5.1 (MIT) · GridStack 13.3.0 (MIT) · DM Sans (OFL) · Vite (MIT, apenas build) · Ícones de instituições: <a href="https://github.com/henriquezolini/react-bancos" target="_blank" rel="noopener noreferrer">react-bancos</a> (MIT). Os logos são marcas de seus titulares, usados só para identificar as instituições.`, '')}
             ${row('Documentação da Pluggy', html`<a href="https://docs.pluggy.ai/pt/docs/overview" target="_blank" rel="noopener noreferrer">docs.pluggy.ai</a> · <a href="https://meu.pluggy.ai" target="_blank" rel="noopener noreferrer">meu.pluggy.ai</a>`, '')}
             ${row('Modo de depuração', 'Registra no console deste navegador informações técnicas REDIGIDAS (sem segredos, tokens ou documentos).', html`<label class="switch"><input type="checkbox" data-change="debug" ${s.preferences.debug ? 'checked' : ''} /><span class="switch__track"></span><span class="sr-only">Modo de depuração</span></label>`)}
           </section>
@@ -300,6 +320,10 @@ export function mount(ctx: PageContext): () => void {
       if (ok) await actions.removeItemLocally(el.dataset.value!);
     },
     'change-pass': () => openChangePassphrase(),
+    'install-app': async () => {
+      await promptInstall();
+      paint();
+    },
     'remove-credentials': async () => {
       const ok = await confirmDialog({ title: 'Remover credenciais?', message: 'Client ID e Client Secret serão apagados deste navegador. Para sincronizar de novo será preciso informá-los novamente.', confirmLabel: 'Remover credenciais', danger: true });
       if (ok) await actions.removeCredentials();
@@ -380,8 +404,9 @@ export function mount(ctx: PageContext): () => void {
   });
 
   const unsub = store.subscribe((s, prev) => {
-    if (s.connection !== prev.connection || s.preferences !== prev.preferences || s.itemIds !== prev.itemIds || s.sync !== prev.sync || s.dataVersion !== prev.dataVersion) paint();
+    if (s.connection !== prev.connection || s.preferences !== prev.preferences || s.itemIds !== prev.itemIds || s.sync !== prev.sync || s.dataVersion !== prev.dataVersion || s.online !== prev.online) paint();
   });
+  const offInstall = onInstallStateChange(paint);
   paint();
   const section = ctx.params.get('secao');
   if (section) requestAnimationFrame(() => document.getElementById(`set-${section}`)?.scrollIntoView({ block: 'start' }));
@@ -390,5 +415,6 @@ export function mount(ctx: PageContext): () => void {
     off();
     offChange();
     unsub();
+    offInstall();
   };
 }

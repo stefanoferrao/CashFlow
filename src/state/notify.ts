@@ -8,6 +8,10 @@ export interface Notification {
   kind: NotifyKind;
   title: string;
   message?: string;
+  /** Botão no aviso (ex.: "Atualizar"). */
+  action?: { label: string; run: () => void };
+  /** Não some sozinho (até o usuário agir ou fechar). */
+  sticky?: boolean;
 }
 
 type Listener = (n: Notification) => void;
@@ -15,6 +19,12 @@ const listeners = new Set<Listener>();
 
 export function notify(kind: NotifyKind, title: string, message?: string): void {
   const n: Notification = message === undefined ? { kind, title } : { kind, title, message };
+  for (const l of listeners) l(n);
+}
+
+/** Aviso com botão de ação (fica na tela até o usuário responder). */
+export function notifyAction(kind: NotifyKind, title: string, message: string, action: { label: string; run: () => void }): void {
+  const n: Notification = { kind, title, message, action, sticky: true };
   for (const l of listeners) l(n);
 }
 

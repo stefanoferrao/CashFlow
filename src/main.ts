@@ -6,5 +6,7 @@ import './styles/layout.css';
 import './styles/components.css';
 import './styles/pages.css';
 import { startApp } from './app';
+import { setupPwa } from './pwa';
 
+setupPwa();
 void startApp();

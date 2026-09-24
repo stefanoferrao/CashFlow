@@ -274,8 +274,8 @@ export class PluggyClient {
   }
 
   /** GET /connectors?countries=BR — catálogo de instituições (nome, logo e cor oficiais da Pluggy). */
-  async getConnectors(): Promise<PluggyConnector[]> {
-    return this.getAllPages<PluggyConnector>('/connectors?countries=BR');
+  async getConnectors(onlyBrazil = true): Promise<PluggyConnector[]> {
+    return this.getAllPages<PluggyConnector>(onlyBrazil ? '/connectors?countries=BR' : '/connectors');
   }
 
   /** POST /connect_token — token de 30 min para o widget Pluggy Connect. */

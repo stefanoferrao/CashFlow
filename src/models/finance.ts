@@ -52,8 +52,32 @@ export interface InstitutionIdentity {
   icon: string | null;
   /** Conector da Pluggy cujo logo é usado (catálogo GET /connectors). */
   connectorId: number | null;
+  /** Logo: https (catálogo da Pluggy) ou imagem enviada (data:image/…). */
   imageUrl: string | null;
+  /** Ícone da biblioteca local (public/banks/<slug>.svg) — tem prioridade sobre imageUrl. */
+  bank?: string | null;
   updatedAt: string;
+}
+
+/** Logo próprio de uma conta ou cartão (ex.: "Nubank Ultravioleta"), em vez do da instituição. */
+export interface ProductLogo {
+  /** Ícone da biblioteca local. */
+  bank: string | null;
+  /** Imagem enviada (data:image/…). */
+  imageUrl: string | null;
+  /** true = usar o logo da instituição mesmo que o nome do cartão indique um produto (ex.: "Ultravioleta"). */
+  inherit?: boolean;
+}
+
+/** Logo pronto para exibir (instituição ou produto). */
+export interface LogoView {
+  name: string;
+  imageUrl: string | null;
+  primaryColor: string | null;
+  logo: InstitutionLogo;
+  icon: string | null;
+  initials: string;
+  textColor: string;
 }
 
 /** Dias de fechamento/vencimento definidos pelo usuário (usados quando a instituição não informa). */
@@ -70,13 +94,15 @@ export interface UserLabels {
   nicknames: Record<string, string>;
   /** Ciclo de fatura manual, por id do cartão. */
   cardCycles: Record<string, CardCycleSetting>;
+  /** Logo próprio de contas e cartões, por id. */
+  productLogos: Record<string, ProductLogo>;
 }
 
-export const emptyLabels = (): UserLabels => ({ identities: {}, nicknames: {}, cardCycles: {} });
+export const emptyLabels = (): UserLabels => ({ identities: {}, nicknames: {}, cardCycles: {}, productLogos: {} });
 
 /** Tolera registros salvos por versões anteriores (campos ausentes). */
 export function normalizeLabels(v: Partial<UserLabels> | null | undefined): UserLabels {
-  return { identities: v?.identities ?? {}, nicknames: v?.nicknames ?? {}, cardCycles: v?.cardCycles ?? {} };
+  return { identities: v?.identities ?? {}, nicknames: v?.nicknames ?? {}, cardCycles: v?.cardCycles ?? {}, productLogos: v?.productLogos ?? {} };
 }
 
 /** Subconjunto do catálogo de conectores da Pluggy (GET /connectors) usado para logo e cor. */
@@ -133,6 +159,8 @@ export interface NormalizedAccount {
   nickname?: string | null;
   /** "Instituição · Nome" — para contextos em que a instituição não aparece ao lado. */
   label?: string;
+  /** Logo próprio desta conta (quando diferente do da instituição). */
+  logo?: LogoView | null;
 }
 
 export interface NormalizedCard {
@@ -162,9 +190,13 @@ export interface NormalizedCard {
   rawName?: string;
   nickname?: string | null;
   label?: string;
-  /** Dias definidos pelo usuário — usados só quando a instituição não informa fechamento/vencimento. */
+  /** Dias definidos pelo usuário — têm prioridade sobre as datas da instituição. */
   manualClosingDay?: number | null;
   manualDueDay?: number | null;
+  /** Logo próprio deste cartão (produto, ex.: "Nubank Ultravioleta"), quando diferente do da instituição. */
+  logo?: LogoView | null;
+  /** De onde veio o logo do cartão: escolhido pelo usuário ou reconhecido pelo nome/nível do cartão. */
+  logoSource?: 'user' | 'detected' | null;
 }
 
 export interface NormalizedBill {
@@ -210,6 +242,8 @@ export interface NormalizedTransaction {
   providerCategory: string | null;
   providerCategoryId: string | null;
   installment: { number: number; total: number } | null;
+  /** Data da compra original (parcelas) — ajuda a saber se `date` é a data da compra ou da parcela. */
+  purchaseDate?: DateKey | null;
   billId: string | null;
   /** 'YYYY-MM' — só em conectores Open Finance. */
   billForecast: MonthKey | null;

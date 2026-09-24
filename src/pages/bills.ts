@@ -9,7 +9,9 @@ import type { PageContext } from '../router';
 import { calculateFutureCardCharges } from '../services/financialCalculator';
 import { store } from '../state/store';
 import { formatDate, formatMoney, formatMonthKey, formatShortDate } from '../utils/format';
-import { analytics, canvasFor, chartFrame, commonHandlers, dataTable, hasAnyData, institutionOf, noDataState, onDataChange, tableToggle } from './shared';
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
+import { analytics, canvasFor, chartFrame, commonHandlers, dataTable, hasAnyData, logoOf, noDataState, onDataChange, tableToggle } from './shared';
 
 export function mount(ctx: PageContext): () => void {
   const root = ctx.root;
@@ -33,7 +35,7 @@ export function mount(ctx: PageContext): () => void {
     const summary = a.bills.find((b) => b.card.id === card.id);
     const proj = summary ? a.billProjections[card.id] : undefined;
     const closed = s.dataset.bills.filter((b) => b.cardId === card.id).sort((x, y) => y.dueDate.localeCompare(x.dueDate));
-    const future = summary ? calculateFutureCardCharges(summary, a.transactions, 6) : [];
+    const future = summary ? calculateFutureCardCharges(summary, 6) : [];
     const cur = card.currency;
 
     render(
@@ -45,8 +47,7 @@ export function mount(ctx: PageContext): () => void {
             ? segmented(
                 'select-card',
                 cards.map((c) => {
-                  const inst = institutionOf(c.itemId);
-                  return { value: c.id, label: html`<span class="inst-name">${inst ? instLogo(inst, 'xs') : ''}<span class="inst-name__text">${c.name}</span></span>` };
+                  return { value: c.id, label: html`<span class="inst-name">${instLogo(logoOf(c), 'xs')}<span class="inst-name__text">${c.name}</span></span>` };
                 }),
                 card.id,
                 'Cartão',
@@ -72,8 +73,14 @@ export function mount(ctx: PageContext): () => void {
                 ${figureValue(proj.forecast, 'hero', cur)}
                 <div class="breakdown">
                   <div class="breakdown__row"><span>Fatura já lançada</span><strong>${money(proj.launched, { currency: cur })}</strong></div>
-                  <div class="breakdown__row"><span>Compras futuras (parcelas conhecidas) ${infoTip('Lançamentos com data futura dentro do ciclo atual, como parcelas de compras anteriores.')}</span><strong>${money(proj.future, { currency: cur })}</strong></div>
-                  <div class="breakdown__row"><span>Previsão final</span><strong>${money(proj.forecast, { currency: cur })}</strong></div>
+                  <div class="breakdown__row"><span>Lançamentos futuros no ciclo ${infoTip('Lançamentos com data futura dentro do ciclo atual (ex.: parcelas já informadas pela instituição).')}</span><strong>${money(r2(proj.future - summary.projectedAmount), { currency: cur })}</strong></div>
+                  ${summary.projectedAmount
+                    ? html`<div class="breakdown__row"><span>Parcelas previstas ${infoTip('Próximas parcelas de compras parceladas em faturas anteriores que a instituição ainda não lançou nesta fatura.')}</span><strong>${money(summary.projectedAmount, { currency: cur })}</strong></div>`
+                    : ''}
+                  ${summary.institutionBill
+                    ? html`<div class="breakdown__row"><span>Informado pela instituição ${infoTip('Total da fatura com este vencimento na lista de faturas da instituição. Quando é maior que a soma das transações, a previsão usa este valor.')}</span><strong>${money(summary.institutionBill.totalAmount, { currency: summary.institutionBill.currency })}</strong></div>`
+                    : ''}
+                  <div class="breakdown__row"><span>Previsão final${summary.totalSource === 'institution' ? ' (valor da instituição)' : ''}</span><strong>${money(proj.forecast, { currency: cur })}</strong></div>
                 </div>
                 <div class="pace" role="note">
                   ${icon('trending')}
@@ -109,6 +116,18 @@ export function mount(ctx: PageContext): () => void {
 
           <section class="card card--flush">
             <div class="card__pad" style="padding-bottom:12px"><div class="card__title card__title--lg">Lançamentos do ciclo atual</div></div>
+            ${summary.projected.length
+              ? html`<div class="list">${summary.projected.map(
+                  (p) => html`<div class="list-item list-item--projected">
+                    <span class="cat-icon" aria-hidden="true">${icon('clock')}</span>
+                    <div class="list-item__main">
+                      <span class="list-item__title">${p.description}</span>
+                      <span class="list-item__sub">Parcela ${p.number}/${p.total} · prevista (ainda não lançada pela instituição)</span>
+                    </div>
+                    <div class="list-item__end">${money(p.amount, { currency: cur })}</div>
+                  </div>`,
+                )}</div>`
+              : ''}
             ${summary.transactions.length
               ? html`<div class="list">${summary.transactions
                   .slice()
@@ -119,7 +138,7 @@ export function mount(ctx: PageContext): () => void {
                       ${categoryIcon(t.category)}
                       <div class="list-item__main">
                         <span class="list-item__title">${t.description}</span>
-                        <span class="list-item__sub">${formatDate(t.date)}${t.installment ? ` · parcela ${t.installment.number}/${t.installment.total}` : ''}${t.date > a.today ? ' · futuro' : ''}</span>
+                        <span class="list-item__sub">${formatDate(t.date)}${t.installment ? ` · parcela ${t.installment.number}/${t.installment.total}` : ''}${t.date > a.today ? ' · futuro' : t.status === 'pending' ? ' · pendente' : ''}</span>
                       </div>
                       <div class="list-item__end">${money(-t.amount, { currency: cur })}</div>
                     </div>`,
@@ -127,20 +146,22 @@ export function mount(ctx: PageContext): () => void {
                   ${summary.transactions.length > 10
                     ? html`<div class="pagination"><span>${showAll ? summary.transactions.length : 10} de ${summary.transactions.length} lançamentos</span><button type="button" class="btn btn--ghost btn--sm" data-action="toggle-all" aria-expanded="${showAll}">${icon(showAll ? 'chevronUp' : 'chevronDown')}${showAll ? 'Mostrar menos' : 'Mostrar todos'}</button></div>`
                     : ''}`
-              : html`<div class="card__pad">${na('Nenhum lançamento no ciclo atual')}</div>`}
+              : summary.projected.length
+                ? ''
+                : html`<div class="card__pad">${na('Nenhum lançamento no ciclo atual')}</div>`}
           </section>
 
           <section class="card">
-            <div class="card__title card__title--lg">Faturas futuras (parcelas já conhecidas)</div>
+            <div class="card__title card__title--lg">Próximas faturas (parcelas já conhecidas)</div>
             ${future.length
               ? dataTable({
-                  caption: 'Faturas futuras',
-                  headers: ['Fatura', 'Vencimento estimado', 'Lançamentos', 'Valor conhecido'],
-                  rows: future.map((f) => [formatMonthKey(f.month), formatDate(f.due), String(f.count), money(f.total, { currency: cur })]),
+                  caption: 'Próximas faturas',
+                  headers: ['Fatura', 'Vencimento estimado', 'Lançamentos', 'Parcelas previstas', 'Valor conhecido'],
+                  rows: future.map((f) => [formatMonthKey(f.month), formatDate(f.due), String(f.count), money(f.projected, { currency: cur }), money(f.total, { currency: cur })]),
                   numericFrom: 2,
                 })
               : na('Nenhuma parcela futura conhecida')}
-            <p class="field__hint">Valores mínimos: novas compras ainda serão somadas. Datas de vencimento projetadas mês a mês a partir do ciclo atual.</p>
+            <p class="field__hint">Valores mínimos: novas compras ainda serão somadas. As parcelas previstas continuam compras parceladas já vistas (ex.: depois da 3/10 vêm 4/10…10/10), uma por fatura.</p>
           </section>`}
 
         <section class="card">

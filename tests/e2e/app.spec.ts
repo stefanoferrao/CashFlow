@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { BAD_SECRET, CLIENT_ID, GOOD_SECRET, ITEM_ID, NUBANK_LOGO, dumpIndexedDb, mockPluggy } from './pluggy-mock';
+import { BAD_SECRET, CLIENT_ID, GOOD_SECRET, ITEM_ID, dumpIndexedDb, mockPluggy } from './pluggy-mock';
 
 const PASS = 'Minha-Senha-Local-2026';
 
@@ -215,14 +215,16 @@ test.describe('Identidade das instituições', () => {
     await page.getByRole('button', { name: 'Ir para o Dashboard' }).click();
     await expect(page.locator('[data-widget="saldo"]')).toContainText('R$ 10.000,00', { timeout: 15_000 });
 
-    // Contas: "MeuPluggy" vira "Nubank" (detectado pela razão social), com logo do catálogo da Pluggy
+    // Contas: "MeuPluggy" vira "Nubank" (detectado pela razão social), com o logo da biblioteca local (sem terceiros)
     await page.evaluate(() => (location.hash = '#/contas'));
     const group = page.locator('.inst-group').first();
     await expect(group.locator('strong').first()).toHaveText('Nubank');
     await expect(group).toContainText('via Meu Pluggy');
     await expect(group).toContainText('Banco identificado automaticamente');
     await expect(group).toContainText('Na instituição: Nu Pagamentos S.A. - Instituição de Pagamento');
-    await expect(group.locator(`img[src="${NUBANK_LOGO}"]`).first()).toBeAttached({ timeout: 10_000 });
+    const logo = group.locator('img[src="./banks/nubank.svg"]').first();
+    await expect(logo).toBeAttached({ timeout: 10_000 });
+    await expect.poll(() => logo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
 
     // Cartões: nome do titular nunca aparece; sem datas → definir fechamento/vencimento
     await page.evaluate(() => (location.hash = '#/cartoes'));
@@ -235,14 +237,26 @@ test.describe('Identidade das instituições', () => {
     await cycle.getByRole('button', { name: 'Salvar' }).click();
     await expect(page.getByText('definido por você').first()).toBeVisible();
 
-    // Personalizar: novo nome e cor valem em cartões e transações
-    await page.getByRole('button', { name: 'Personalizar' }).first().click();
-    const dlg = page.getByRole('dialog');
+    // Logo e nome: novo nome e cor valem em cartões e transações
+    await page.getByRole('button', { name: 'Logo e nome' }).first().click();
+    let dlg = page.getByRole('dialog');
+    await expect(dlg.locator('[data-search]')).toBeFocused(); // aberto pelo cartão: já na galeria de logos
     await dlg.locator('input[name="ident-name"]').fill('Nubank PF');
     await dlg.locator('label[title="Laranja"]').click();
     await dlg.getByRole('button', { name: 'Salvar' }).click();
     await expect(page.locator('.cc__issuer')).toContainText('Nubank PF');
     expect(await page.locator('.cc').getAttribute('style')).toContain('#FF7A00');
+
+    // Logo próprio do cartão (produto) escolhido na galeria local
+    await page.getByRole('button', { name: 'Logo e nome' }).first().click();
+    dlg = page.getByRole('dialog');
+    await expect(dlg.locator('.logo-target[aria-checked="true"]')).toContainText('Mastercard Gold');
+    await dlg.locator('[data-search]').fill('ultravioleta');
+    await dlg.locator('[data-bank="nubankultravioleta"]').first().click();
+    await expect(dlg.locator('.logo-target[aria-checked="true"]')).toContainText('Logo próprio');
+    await dlg.getByRole('button', { name: 'Salvar' }).click();
+    await expect(page.locator('.cc__issuer img[src="./banks/nubankultravioleta.svg"]')).toBeAttached();
+    await expect(page.locator('.cc__issuer')).toContainText('Nubank PF');
     await page.evaluate(() => (location.hash = '#/transacoes'));
     await expect(page.locator('select[data-filter="institution"] option', { hasText: 'Nubank PF' })).toHaveCount(1);
 
@@ -257,7 +271,24 @@ test.describe('Identidade das instituições', () => {
     await page.getByRole('button', { name: 'Desbloquear' }).click();
     await page.evaluate(() => (location.hash = '#/cartoes'));
     await expect(page.locator('.cc__issuer')).toContainText('Nubank PF', { timeout: 15_000 });
+    await expect(page.locator('.cc__issuer img[src="./banks/nubankultravioleta.svg"]')).toBeAttached();
     await expect(page.getByText('definido por você').first()).toBeVisible();
+  });
+
+  test('galeria de logos: escolher o banco na biblioteca local vale para a conexão e seus cartões', async ({ page }) => {
+    await startDemo(page);
+    await page.evaluate(() => (location.hash = '#/contas'));
+    await page.getByRole('button', { name: 'Personalizar' }).first().click();
+    const dlg = page.getByRole('dialog');
+    await dlg.locator('[data-search]').fill('077'); // código COMPE do Inter
+    await expect(dlg.locator('.logo-tile').first()).toContainText('Banco Inter');
+    await dlg.locator('[data-bank="inter"]').click();
+    await expect(dlg.locator('input[name="ident-name"]')).toHaveValue('Banco Inter');
+    await dlg.getByRole('button', { name: 'Salvar' }).click();
+    await expect(page.locator('.inst-group').first().locator('img[src="./banks/inter.svg"]').first()).toBeAttached();
+    await page.evaluate(() => (location.hash = '#/cartoes'));
+    await expect(page.locator('.cc__issuer').first()).toContainText('Banco Inter');
+    expect(await page.locator('.cc').first().getAttribute('style')).toContain('#FF7A00');
   });
 
   test('demonstração: renomear instituição e conta reflete nas outras páginas', async ({ page }) => {
@@ -292,5 +323,35 @@ test.describe('Dados locais', () => {
     const dump = await dumpIndexedDb(page);
     expect(dump).not.toContain('credentials');
     expect(await page.evaluate(() => localStorage.getItem('cashflow.theme'))).toBeNull();
+  });
+});
+
+test.describe('Aplicativo (PWA)', () => {
+  test.use({ serviceWorkers: 'allow' });
+
+  test('instalável: manifesto, service worker e abertura sem internet', async ({ page, context }) => {
+    await page.goto('/');
+    test.skip((await page.locator('html').getAttribute('data-sw')) !== 'on', 'service worker só existe no build de produção');
+    await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', './manifest.webmanifest');
+    const manifest = await page.evaluate(async () => (await fetch('./manifest.webmanifest')).json());
+    expect(manifest.display).toBe('standalone');
+    expect(manifest.icons.some((i: { purpose?: string; sizes: string }) => i.purpose === 'maskable' && i.sizes === '512x512')).toBe(true);
+
+    await page.getByRole('button', { name: /demonstração/i }).first().click();
+    await expect(page.locator('[data-widget="saldo"]')).toBeVisible();
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await expect.poll(() => page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.active?.state)).toBe('activated');
+    await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
+
+    // Sem internet, o app abre a partir do cache e nada da API da Pluggy é guardado.
+    await context.setOffline(true);
+    await page.reload();
+    await expect(page.locator('#page-title')).toHaveText('Dashboard', { timeout: 15_000 });
+    const cachedApi = await page.evaluate(async () => {
+      for (const k of await caches.keys()) for (const r of await (await caches.open(k)).keys()) if (/pluggy\.ai|pluggy-api/.test(r.url)) return true;
+      return false;
+    });
+    expect(cachedApi).toBe(false);
+    await context.setOffline(false);
   });
 });

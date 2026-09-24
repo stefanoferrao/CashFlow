@@ -10,6 +10,7 @@ import { formatRelative } from '../utils/format';
 import { $, delegate, html, render, type SafeHtml } from './dom';
 import { icon, logoMark } from './icons';
 import { openModal } from './modal';
+import { installState, onInstallStateChange, promptInstall } from '../pwa';
 
 export interface NavItem {
   path: string;
@@ -136,6 +137,7 @@ function topbar(title: string, st: AppState): SafeHtml {
           <div class="menu__label">${st.mode === 'demo' ? 'Modo demonstração' : 'Sua sessão'}</div>
           <a class="menu__item" role="menuitem" href="#/configuracoes">${icon('settings')}Configurações</a>
           <a class="menu__item" role="menuitem" href="#/privacidade">${icon('shield')}Privacidade e segurança</a>
+          ${installState() === 'available' ? html`<button type="button" class="menu__item" role="menuitem" data-action="install-app">${icon('phone')}Instalar aplicativo</button>` : ''}
           <div class="menu__sep"></div>
           ${st.mode === 'demo'
             ? html`<button type="button" class="menu__item" role="menuitem" data-action="exit-demo">${icon('logout')}Sair da demonstração</button>`
@@ -214,6 +216,10 @@ export function mountShell(host: HTMLElement, initialPath: string): ShellHandle 
       }
     },
     lock: () => actions.lockApp('manual'),
+    'install-app': () => {
+      closeMenus();
+      void promptInstall();
+    },
     'exit-demo': () => void actions.exitDemo(),
     'open-more': () => openMoreSheet(active),
   });
@@ -250,6 +256,8 @@ export function mountShell(host: HTMLElement, initialPath: string): ShellHandle 
     }
   });
 
+  const offInstall = onInstallStateChange(repaintChrome);
+
   // Atualiza "Atualizado há X minutos"
   const tick = setInterval(() => {
     const el = $('[data-sync-status]', host);
@@ -272,6 +280,7 @@ export function mountShell(host: HTMLElement, initialPath: string): ShellHandle 
     destroy() {
       offClick();
       unsub();
+      offInstall();
       clearInterval(tick);
       document.removeEventListener('click', onDocClick);
       document.removeEventListener('keydown', onKey);
@@ -294,6 +303,11 @@ function openMoreSheet(active: string): void {
       </ul>
     </nav>
     <div class="divider"></div>
+    ${installState() === 'available'
+      ? html`<button type="button" class="btn btn--primary btn--block" data-install style="margin-bottom:8px">${icon('phone')}Instalar aplicativo</button>`
+      : installState() === 'ios'
+        ? html`<a class="btn btn--secondary btn--block" href="#/configuracoes?secao=aplicativo" data-close style="margin-bottom:8px">${icon('phone')}Instalar no iPhone</a>`
+        : ''}
     ${st.mode === 'demo'
       ? html`<button type="button" class="btn btn--secondary btn--block" data-exit-demo>${icon('logout')}Sair da demonstração</button>`
       : html`<button type="button" class="btn btn--secondary btn--block" data-lock>${icon('lock')}${st.connection.vaultMode === 'session' ? 'Encerrar sessão' : 'Bloquear agora'}</button>`}`,
@@ -302,6 +316,10 @@ function openMoreSheet(active: string): void {
   m.el.querySelector('[data-exit-demo]')?.addEventListener('click', () => {
     m.close();
     void actions.exitDemo();
+  });
+  m.el.querySelector('[data-install]')?.addEventListener('click', () => {
+    m.close();
+    void promptInstall();
   });
   m.el.querySelector('[data-lock]')?.addEventListener('click', () => {
     m.close();

@@ -19,6 +19,9 @@ export default defineConfig({
     locale: 'pt-BR',
     timezoneId: 'America/Sao_Paulo',
     trace: 'retain-on-failure',
+    // O service worker do PWA intermediaria as requisições e esconderia os mocks da Pluggy (page.route).
+    // Ele é testado à parte, em "Aplicativo (PWA)", com serviceWorkers: 'allow'.
+    serviceWorkers: 'block',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: process.env.E2E_BASE_URL

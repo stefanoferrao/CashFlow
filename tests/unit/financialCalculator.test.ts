@@ -6,6 +6,7 @@ import {
   calculateCategoryBreakdown,
   calculateCreditUtilization,
   calculateCurrentBills,
+  calculateFutureCardCharges,
   calculateNetWorth,
   calculateNetWorthGrowth,
   calculatePeriodTotals,
@@ -308,5 +309,93 @@ describe('histórico', () => {
 
   it('sem histórico suficiente → null (nada inventado)', () => {
     expect(calculateNetWorthGrowth([], 1000, '2026-09-15', 30)).toBeNull();
+  });
+});
+
+describe('faturas: fatura aberta informada pela instituição, billId e parcelas', () => {
+  // Cenário do Inter (Open Finance): a lista de faturas da instituição já traz a fatura ABERTA (fecha no futuro)
+  // e as transações do ciclo apontam para ela via billId.
+  const inter = card({ id: 'inter', closingDate: null, dueDate: null });
+  const closedAug = bill({ id: 'b-set', cardId: 'inter', closingDate: '2026-08-31', dueDate: '2026-09-10', totalAmount: 1500, paidAmount: 1500, isPaid: true });
+  const openOct = bill({ id: 'b-out', cardId: 'inter', closingDate: '2026-09-30', dueDate: '2026-10-10', totalAmount: 0, paidAmount: 0, isPaid: false });
+  const itx = (p: Parameters<typeof cardTx>[0]) => cardTx({ cardId: 'inter', ...p });
+
+  it('fatura aberta da lista não é tratada como fechada (o total não zera)', () => {
+    const txs = [
+      itx({ amount: -200, date: '2026-09-05', billId: 'b-out' }),
+      itx({ amount: -300, date: '2026-09-12', billId: 'b-out' }),
+      itx({ amount: -999, date: '2026-08-20', billId: 'b-set' }), // fatura fechada
+    ];
+    const [s] = calculateCurrentBills([inter], txs, [closedAug, openOct], '2026-09-24');
+    expect(s!.cycle.closing).toBe('2026-09-30');
+    expect(s!.cycle.due).toBe('2026-10-10');
+    expect(s!.cycle.source).toBe('institution');
+    expect(s!.total).toBe(500);
+  });
+
+  it('com dias do usuário, as transações da fatura aberta continuam no ciclo', () => {
+    const c = { ...inter, manualClosingDay: 30, manualDueDay: 10 };
+    const txs = [itx({ amount: -200, date: '2026-09-05', billId: 'b-out' }), itx({ amount: -50, date: '2026-09-20' })];
+    const [s] = calculateCurrentBills([c], txs, [closedAug, openOct], '2026-09-24');
+    expect(s!.cycle.source).toBe('user');
+    expect(s!.total).toBe(250);
+  });
+
+  it('usa o valor informado pela instituição quando é maior que a soma das transações', () => {
+    const txs = [itx({ amount: -200, date: '2026-09-05' })];
+    const [s] = calculateCurrentBills([inter], txs, [closedAug, { ...openOct, totalAmount: 870 }], '2026-09-24');
+    expect(s!.total).toBe(870);
+    expect(s!.totalSource).toBe('institution');
+    const p = calculateProjectedBill(s!, '2026-09-24');
+    expect(p.forecast).toBe(870);
+    expect(p.series[p.series.length - 1]!.projected).toBeGreaterThanOrEqual(870);
+  });
+
+  it('projeta as próximas parcelas de compras parceladas (fatura aberta e seguintes)', () => {
+    const txs = [
+      // 3/10 numa fatura fechada (set.) → 4/10 é esperada na aberta (out.) e 5/10 na de novembro
+      itx({ amount: -100, date: '2026-08-15', description: 'LOJA X 03/10', installment: { number: 3, total: 10 }, billId: 'b-set' }),
+      // 2/2 já lançada na aberta → nada a projetar
+      itx({ amount: -40, date: '2026-09-02', description: 'CURSO 2/2', installment: { number: 2, total: 2 }, billId: 'b-out' }),
+    ];
+    const [s] = calculateCurrentBills([inter], txs, [closedAug, openOct], '2026-09-24');
+    expect(s!.projected.map((p) => `${p.number}/${p.total}`)).toEqual(['4/10']);
+    expect(s!.projectedAmount).toBe(100);
+    expect(s!.total).toBe(140);
+    const next = calculateFutureCardCharges(s!, 12);
+    expect(next[0]!.month).toBe('2026-11');
+    expect(next[0]!.total).toBe(100);
+    expect(next[0]!.projected).toBe(100);
+    expect(next).toHaveLength(6); // 5/10 … 10/10
+  });
+
+  it('parcela já lançada no futuro não é projetada de novo', () => {
+    const c = card({ closingDate: '2026-09-28', dueDate: '2026-10-05' });
+    const txs = [
+      cardTx({ amount: -100, date: '2026-09-10', description: 'TV 1/3', installment: { number: 1, total: 3 } }),
+      cardTx({ amount: -100, date: '2026-10-10', description: 'TV 2/3', installment: { number: 2, total: 3 }, status: 'pending' }),
+    ];
+    const [s] = calculateCurrentBills([c], txs, [], '2026-09-15');
+    const next = calculateFutureCardCharges(s!, 6);
+    expect(next.map((f) => [f.month, f.total, f.projected])).toEqual([
+      ['2026-11', 100, 0],
+      ['2026-12', 100, 100],
+    ]);
+  });
+
+  it('billForecast com outro mês de referência é calibrado pelas compras à vista', () => {
+    const c = card({ closingDate: '2026-09-28', dueDate: '2026-10-05' });
+    // Instituição informa o mês do FECHAMENTO (09) em vez do vencimento (10).
+    const txs = [5, 9, 12, 20].map((d) => cardTx({ amount: -10, date: `2026-09-${String(d).padStart(2, '0')}`, billForecast: '2026-09' }));
+    const [s] = calculateCurrentBills([c], txs, [], '2026-09-24');
+    expect(s!.total).toBe(40);
+  });
+
+  it('projeção de saldo não conta duas vezes a fatura aberta informada pela instituição', () => {
+    const txs = [itx({ amount: -200, date: '2026-09-05', billId: 'b-out' })];
+    const open = { ...openOct, totalAmount: 200 };
+    const summaries = calculateCurrentBills([inter], txs, [closedAug, open], '2026-09-24');
+    const ev = buildProjectionEvents({ today: '2026-09-24', days: 30, transactions: txs, billSummaries: summaries, bills: [closedAug, open], recurrences: [], planned: [], includeEstimates: false });
+    expect(ev.filter((e) => e.kind === 'bill').map((e) => e.amount)).toEqual([-200]);
   });
 });

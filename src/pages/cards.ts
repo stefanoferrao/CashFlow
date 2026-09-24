@@ -4,15 +4,15 @@
 import { barChart, mountChart } from '../charts/charts';
 import { animateNumbers, delegate, html, render, type SafeHtml } from '../components/dom';
 import { icon } from '../components/icons';
-import { badge, figureValue, infoTip, instLogo, meter, money, na, utilizationBadge } from '../components/ui';
-import type { NormalizedCard, NormalizedInstitution } from '../models/finance';
+import { type InstLike, badge, figureValue, infoTip, instLogo, meter, money, na, utilizationBadge } from '../components/ui';
+import type { NormalizedCard } from '../models/finance';
 import { readableTextOn } from '../services/institutions';
 import type { PageContext } from '../router';
 import { calculateFutureCardCharges, cardUtilization } from '../services/financialCalculator';
 import { store } from '../state/store';
 import { addDays, parseKey } from '../utils/dates';
 import { formatDate, formatMoney, formatMonthKey, formatPercent } from '../utils/format';
-import { analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, institutionOf, noDataState, onDataChange, tableToggle } from './shared';
+import { analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, institutionOf, logoOf, noDataState, onDataChange, tableToggle } from './shared';
 
 function darken(hex: string, amount = 0.45): string {
   const h = hex.replace('#', '');
@@ -22,7 +22,7 @@ function darken(hex: string, amount = 0.45): string {
   return `#${[(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => f(c).toString(16).padStart(2, '0')).join('')}`;
 }
 
-export function creditCardVisual(c: NormalizedCard, inst?: NormalizedInstitution | null): SafeHtml {
+export function creditCardVisual(c: NormalizedCard, inst?: InstLike | null): SafeHtml {
   const a = c.institutionColor && /^#[0-9a-f]{6}$/i.test(c.institutionColor) ? c.institutionColor : '#1f2937';
   const u = cardUtilization(c);
   const brandLevel = [c.brand, c.level].filter(Boolean).join(' ');
@@ -33,7 +33,7 @@ export function creditCardVisual(c: NormalizedCard, inst?: NormalizedInstitution
         <span class="cc__brand">${brandLevel || 'Cartão de crédito'}</span>
         ${showName ? html`<span class="cc__inst">${c.name}</span>` : ''}
       </div>
-      <span class="cc__issuer">${inst ? instLogo(inst, 'xs') : ''}<span>${c.institution}</span></span>
+      <span class="cc__issuer"><span>${c.institution}</span>${inst ? instLogo(inst, 'sm') : ''}</span>
     </div>
     <div class="cc__chip" aria-hidden="true"></div>
     <div class="cc__number sensitive">•••• •••• •••• ${c.lastFourDigits ?? '••••'}</div>
@@ -81,19 +81,20 @@ export function mount(ctx: PageContext): () => void {
           ${cards.map((card) => {
             const summary = a.bills.find((b) => b.card.id === card.id);
             const proj = summary ? a.billProjections[card.id] : undefined;
-            const next = summary ? calculateFutureCardCharges(summary, a.transactions, 1)[0] : undefined;
+            const next = summary ? calculateFutureCardCharges(summary, 1)[0] : undefined;
             const u = cardUtilization(card);
             const bestDay = summary ? parseKey(addDays(summary.cycle.closing, 1)).d : null;
             const inst = institutionOf(card.itemId);
+            const logo = logoOf(card);
             const cycleBadge = summary?.cycle.source === 'user' ? html` ${badge('definido por você', 'outline')}` : summary?.cycle.estimated ? html` ${badge('estimado', 'outline')}` : '';
-            const missingDates = !card.closingDate || !card.dueDate;
+            const userDays = !!(card.manualClosingDay || card.manualDueDay);
             return html`<article class="card">
               <div class="card-tile">
-                ${creditCardVisual(card, inst)}
+                ${creditCardVisual(card, logo)}
                 <div class="stack">
                   <div class="row-between wrap">
                     <div class="row" style="gap:10px;min-width:0">
-                      ${inst ? instLogo(inst, 'md') : ''}
+                      ${instLogo(logo, 'md')}
                       <div class="stack-sm" style="gap:2px;min-width:0">
                         <strong class="truncate" style="font-size:18px">${card.name}</strong>
                         <span class="muted" style="font-size:13px">${card.institution}${inst?.via ? ` (via ${inst.via})` : ''} · final ${card.lastFourDigits ?? '—'}${card.holderType === 'ADDITIONAL' ? ' · adicional' : ''}</span>
@@ -109,10 +110,10 @@ export function mount(ctx: PageContext): () => void {
                     ${detail('Percentual utilizado', u !== null ? formatPercent(u) : 'Não informado')}
                     ${detail('Melhor dia de compra', bestDay ? `Dia ${bestDay}` : 'Não informado', 'Estimado como o dia seguinte ao fechamento da fatura aberta.')}
                     ${detail('Fechamento', summary ? html`${formatDate(summary.cycle.closing)}${cycleBadge}` : 'Não informado')}
-                    ${detail('Vencimento', summary ? html`${formatDate(summary.cycle.due)}${summary.cycle.source === 'user' && !card.dueDate ? html` ${badge('definido por você', 'outline')}` : ''}` : 'Não informado')}
-                    ${detail('Fatura atual', summary ? money(summary.total, { currency: card.currency }) : 'Não disponível', 'Soma das compras e estornos do ciclo aberto, calculada a partir das transações.')}
-                    ${detail('Previsão de fechamento', proj ? money(proj.paceForecast, { currency: card.currency }) : '—', 'Lançado + parcelas conhecidas + ritmo médio de gastos até o fechamento.')}
-                    ${detail('Próxima fatura (parcelas já conhecidas)', next ? html`${money(next.total, { currency: card.currency })} <span class="muted" style="font-weight:500;font-size:12px">${formatMonthKey(next.month)}</span>` : 'Nenhuma parcela futura')}
+                    ${detail('Vencimento', summary ? html`${formatDate(summary.cycle.due)}${summary.cycle.source === 'user' ? html` ${badge('definido por você', 'outline')}` : ''}` : 'Não informado')}
+                    ${detail('Fatura atual', summary ? money(summary.total, { currency: card.currency }) : 'Não disponível', 'Compras e estornos do ciclo aberto + parcelas previstas de compras parceladas. Se a instituição informar um valor maior para esta fatura, vale o dela.')}
+                    ${detail('Previsão de fechamento', proj ? money(proj.paceForecast, { currency: card.currency }) : '—', 'Fatura atual + ritmo médio de compras novas até o fechamento.')}
+                    ${detail('Fatura seguinte (parcelas já conhecidas)', next ? html`${money(next.total, { currency: card.currency })} <span class="muted" style="font-weight:500;font-size:12px">${formatMonthKey(next.month)}</span>` : 'Nenhuma parcela futura', 'Parcelas já lançadas para o mês seguinte + próximas parcelas de compras parceladas.')}
                     ${card.minimumPayment !== null ? detail('Pagamento mínimo', money(card.minimumPayment, { currency: card.currency })) : ''}
                     ${detail('Saldo informado pela instituição', money(card.institutionBalance, { currency: card.currency }), 'Valor bruto "balance" da Pluggy. Em conectores Open Finance representa o limite utilizado; em outros, o saldo do mês.')}
                   </div>
@@ -122,8 +123,8 @@ export function mount(ctx: PageContext): () => void {
                   <div class="row wrap">
                     <a class="btn btn--secondary btn--sm" href="#/faturas?card=${card.id}">${icon('receipt')}Ver fatura e previsão</a>
                     <a class="btn btn--ghost btn--sm" href="#/transacoes?card=${card.id}">${icon('list')}Transações do cartão</a>
-                    ${missingDates ? html`<button type="button" class="btn btn--ghost btn--sm" data-action="edit-card-cycle" data-value="${card.id}">${icon('calendar')}Fechamento e vencimento</button>` : ''}
-                    <button type="button" class="btn btn--ghost btn--sm" data-action="edit-identity" data-value="${card.itemId}" data-focus="${card.id}">${icon('pencil')}Personalizar</button>
+                    <button type="button" class="btn btn--ghost btn--sm" data-action="edit-card-cycle" data-value="${card.id}">${icon('calendar')}Fechamento e vencimento${userDays ? html` ${badge('seus dias', 'outline')}` : ''}</button>
+                    <button type="button" class="btn btn--ghost btn--sm" data-action="edit-identity" data-value="${card.itemId}" data-focus="${card.id}">${icon('palette')}Logo e nome</button>
                   </div>
                 </div>
               </div>

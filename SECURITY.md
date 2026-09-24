@@ -19,7 +19,8 @@ como apagá-las — e, com a mesma franqueza, **o que ela não consegue proteger
 | Senha local | **Em lugar nenhum** | Só é usada para derivar a chave; nunca é gravada |
 | `apiKey` da Pluggy (JWT de 2 h) | **Somente memória** (variável do cliente) | Nunca é gravado |
 | Dados financeiros (contas, transações, cartões, faturas, investimentos, categorias, histórico) | IndexedDB, um store por tipo | **Cifrados** com a mesma DEK |
-| Personalizações (nomes e cores das instituições, apelidos, dias de fechamento/vencimento) | IndexedDB, store `categories` | **Cifradas** com a mesma DEK |
+| Personalizações (nomes, cores e logos das instituições e cartões — inclusive imagens enviadas —, apelidos, dias de fechamento/vencimento) | IndexedDB, store `categories` | **Cifradas** com a mesma DEK |
+| Arquivos do app e logos (PWA) | Cache Storage do navegador (service worker) | Texto puro — só arquivos públicos do próprio app e logos; **nunca** respostas da API, credenciais ou dados financeiros |
 | Layout do dashboard e preferências de exibição | IndexedDB (`dashboard_layout`, `user_preferences`) | Texto puro — não contêm dados financeiros nem credenciais |
 | Tema (claro/escuro/sistema) | `localStorage` (`cashflow.theme`) | Texto puro — só o nome do tema |
 
@@ -65,7 +66,7 @@ senha local ──PBKDF2-SHA256 (salt aleatório de 16 bytes, 600.000 iteraçõe
 - **XSS:** descrições de transações e nomes vindos dos bancos são texto não confiável. Toda renderização passa por um template
   que **escapa HTML por padrão**; não há `innerHTML` com dados. Um teste E2E injeta `<img onerror=…>` como descrição e verifica que nada executa.
 - **CSP** (build de produção): `default-src 'self'`; scripts só do próprio site e de `https://cdn.pluggy.ai`; conexões só com
-  `*.pluggy.ai`; `object-src 'none'`; `base-uri 'self'`; `form-action 'self'`.
+  `*.pluggy.ai`; `worker-src 'self'` e `manifest-src 'self'` (PWA); `object-src 'none'`; `base-uri 'self'`; `form-action 'self'`.
 - **Dependências de runtime:** Chart.js e GridStack (versões fixas) e uma fonte local. Sem framework de UI, sem CDN de terceiros
   além da Pluggy, sem scripts de analytics.
 - **Requisições:** `credentials: 'omit'` (nenhum cookie vai junto) e `referrerPolicy: 'no-referrer'`.
@@ -73,7 +74,16 @@ senha local ──PBKDF2-SHA256 (salt aleatório de 16 bytes, 600.000 iteraçõe
   CPF, CNPJ e identificadores.
 - **Erros:** o usuário vê mensagens amigáveis; stack traces e corpos de resposta não são exibidos.
 - **Dados pessoais:** nome e CPF/CNPJ do titular e os dados de pagador/recebedor que a Pluggy retorna não são guardados; da parte de pagamento, só o meio (ex.: PIX) é mantido. Quando a instituição usa o nome do titular como nome da conta ou do cartão (inclusive abreviado), ele é trocado por um nome genérico ("Conta corrente", "Mastercard Gold") na normalização.
-- **Logos das instituições:** vêm do catálogo oficial da Pluggy (`GET /connectors`) e são carregados de `cdn.pluggy.ai` com `referrerpolicy="no-referrer"`. A Pluggy consegue ver quais logos o navegador carrega — ela já sabe quais instituições você conectou. Se preferir não carregar imagens, escolha iniciais ou um ícone em **Personalizar**.
+- **Logos das instituições:** vêm de uma biblioteca **local** (228 SVGs do projeto react-bancos, MIT, em `public/banks/`), servida
+  pelo próprio app: nenhum terceiro fica sabendo quais bancos você usa. Os SVGs são exibidos como `<img>` (não executam scripts) e o
+  script de importação recusa arquivos com script, eventos ou referências externas. Só instituições fora da biblioteca usam o logo do
+  catálogo da Pluggy (`cdn.pluggy.ai`, com `referrerpolicy="no-referrer"`) — a Pluggy já sabe quais instituições você conectou.
+- **Imagem enviada como logo:** lida no navegador (sem upload a lugar nenhum), redesenhada em um PNG de 128 px (o que descarta
+  metadados e qualquer conteúdo ativo de SVG) e guardada cifrada. Só `data:image/png|jpeg|webp` é aceito na hora de exibir.
+- **Service worker (PWA):** registrado só no build de produção. Guarda no Cache Storage apenas os arquivos listados no build e os
+  logos; requisições à API da Pluggy, ao Pluggy Connect, a scripts de terceiros e ao proxy local (`/pluggy-api`) **não passam pelo
+  cache**. Uma versão nova só é ativada quando você clica em "Atualizar agora". O teste E2E verifica que nenhuma resposta da Pluggy
+  fica em cache.
 
 ---
 
@@ -84,7 +94,7 @@ senha local ──PBKDF2-SHA256 (salt aleatório de 16 bytes, 600.000 iteraçõe
 | **Remover credenciais** (com confirmação) | Configurações → Segurança | Client ID/Secret e o `apiKey` em memória. O cache financeiro cifrado continua, até você apagá-lo |
 | **Remover deste navegador** (instituição) | Contas → menu da instituição, ou Configurações → Pluggy | O Item, os dados dele e as personalizações dele **neste navegador** (não apaga nada na Pluggy) |
 | **Limpar cache financeiro** | Configurações → Dados locais | Só os dados baixados da Pluggy; categorização, lançamentos previstos e personalizações são mantidos |
-| **Apagar todos os dados locais** | Configurações → Segurança (confirmação digitando `APAGAR`) | O banco IndexedDB inteiro, o tema no `localStorage` e o `sessionStorage`; descarta chaves da memória e volta ao início |
+| **Apagar todos os dados locais** | Configurações → Segurança (confirmação digitando `APAGAR`) | O banco IndexedDB inteiro, o tema no `localStorage` e o `sessionStorage`; descarta chaves da memória e volta ao início. Também apaga os logos guardados pelo app instalado; os arquivos do app (públicos) continuam — para removê-los, desinstale o app ou apague os dados do site no navegador |
 | **Esqueci a senha local** | Tela de desbloqueio | O mesmo que "Apagar todos os dados locais" (sem a senha não há como decifrar nada) |
 | **Bloquear agora** | Menu do usuário ou Configurações | Nada é apagado; tudo que estava decifrado sai da memória |
 

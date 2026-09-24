@@ -503,3 +503,29 @@
     font-size: 10px;
   }
 }
+
+/* ===================== Aplicativo instalado (PWA) ===================== */
+/* Recortes de tela (notch) em qualquer orientação; no iOS a barra de status fica sobre o app (black-translucent). */
+.sidebar {
+  padding-top: calc(var(--s-6) + var(--safe-top));
+}
+@media (max-width: 767px) {
+  .topbar,
+  .content {
+    padding-left: max(var(--s-4), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--s-4), env(safe-area-inset-right, 0px));
+  }
+}
+@media (display-mode: standalone) {
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
+  /* Em janela própria não há barra do navegador: textos de navegação não precisam ser selecionáveis. */
+  .sidebar,
+  .bottom-nav,
+  .topbar__actions {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}

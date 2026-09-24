@@ -387,38 +387,56 @@ export interface CardCycle {
   due: DateKey;
   /** true quando datas foram inferidas (instituição não informou ou ciclo informado já fechou). */
   estimated: boolean;
-  /** Origem das datas: instituição, dias definidos pelo usuário ou histórico de faturas. */
+  /** Origem das datas: dias definidos pelo usuário, instituição ou histórico de faturas. */
   source: 'institution' | 'user' | 'history';
 }
 
+const validDayOf = (d: number | null | undefined): number | null => (typeof d === 'number' && Number.isInteger(d) && d >= 1 && d <= 31 ? d : null);
+
 /**
  * Ciclo da fatura aberta. Prioridade das datas:
- *  1. balanceCloseDate/balanceDueDate informados pela instituição;
- *  2. dias de fechamento/vencimento definidos pelo usuário (quando a instituição não informa);
- *  3. última fatura fechada + 1 mês (estimado).
- * O início é o dia seguinte ao fechamento da última fatura fechada (ou fechamento − 1 mês).
+ *  1. dias de fechamento/vencimento definidos pelo usuário (escolha explícita — vale mesmo que a instituição informe outras);
+ *  2. balanceCloseDate/balanceDueDate informados pela instituição (projetados para o próximo ciclo se já passaram);
+ *  3. fatura ainda aberta na lista de faturas da instituição (fechamento ≥ hoje);
+ *  4. última fatura fechada + 1 mês (estimado).
+ * O início é o dia seguinte ao fechamento da fatura anterior (ou fechamento − 1 mês).
  */
 export function getCardCycle(card: NormalizedCard, bills: NormalizedBill[], today: DateKey): CardCycle | null {
-  let closing = card.closingDate;
-  let due = card.dueDate;
+  const manualClosing = validDayOf(card.manualClosingDay);
+  const manualDue = validDayOf(card.manualDueDay);
+  const cardBills = bills.filter((b) => b.cardId === card.id).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  let closing: DateKey | null = null;
+  let due: DateKey | null = null;
   let estimated = false;
   let source: CardCycle['source'] = 'institution';
-  const manualClosing = card.manualClosingDay ?? null;
-  const manualDue = card.manualDueDay ?? null;
-  const cardBills = bills.filter((b) => b.cardId === card.id).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
-  if (!closing && manualClosing) {
+  if (manualClosing) {
     closing = nextDayOfMonth(today, manualClosing);
     source = 'user';
+  } else if (card.closingDate) {
+    closing = card.closingDate;
+    due = card.dueDate;
+  } else {
+    const open = cardBills.find((b) => b.closingDate && b.closingDate >= today);
+    if (open?.closingDate) {
+      closing = open.closingDate;
+      due = open.dueDate;
+    } else if (manualDue) {
+      // Só o vencimento foi definido: fechamento estimado 7 dias antes.
+      due = nextDayOfMonth(addDays(today, 7), manualDue);
+      closing = addDays(due, -7);
+      estimated = true;
+      source = 'user';
+    } else {
+      const lastClosed = [...cardBills].reverse().find((b) => b.closingDate && b.closingDate < today);
+      if (!lastClosed?.closingDate) return null;
+      closing = addMonths(lastClosed.closingDate, 1);
+      due = addMonths(lastClosed.dueDate, 1);
+      estimated = true;
+      source = 'history';
+    }
   }
-  if (!closing) {
-    const lastClosed = [...cardBills].reverse().find((b) => b.closingDate);
-    if (!lastClosed?.closingDate) return null;
-    closing = addMonths(lastClosed.closingDate, 1);
-    due = addMonths(lastClosed.dueDate, 1);
-    estimated = true;
-    source = 'history';
-  }
+
   // Ciclo informado já fechou (dados antigos) → projeta o próximo.
   let guard = 0;
   while (closing < today && guard++ < 24) {
@@ -426,19 +444,35 @@ export function getCardCycle(card: NormalizedCard, bills: NormalizedBill[], toda
     if (due) due = addMonths(due, 1);
     estimated = true;
   }
-  if (!due || (source === 'user' && manualDue)) {
+  if (source === 'user' && manualDue && manualClosing) {
+    due = nextDayOfMonth(addDays(closing, 1), manualDue);
+  } else if (!due || due <= closing) {
     if (manualDue) {
       due = nextDayOfMonth(addDays(closing, 1), manualDue);
+    } else if (source === 'user' && card.closingDate && card.dueDate) {
+      // Fechamento do usuário + mesmo intervalo fechamento→vencimento informado pela instituição.
+      due = addDays(closing, Math.max(1, Math.min(25, diffDays(card.closingDate, card.dueDate))));
     } else {
       due = addDays(closing, 7);
       estimated = true;
     }
   }
   const previousClosed = [...cardBills].reverse().find((b) => b.closingDate && b.closingDate < closing!);
-  const start = previousClosed?.closingDate && diffDays(previousClosed.closingDate, closing) <= 40 && diffDays(previousClosed.closingDate, closing) >= 20
-    ? addDays(previousClosed.closingDate, 1)
-    : addDays(addMonths(closing, -1), 1);
+  const gap = previousClosed?.closingDate ? diffDays(previousClosed.closingDate, closing) : 0;
+  const start = previousClosed?.closingDate && gap <= 40 && gap >= 20 ? addDays(previousClosed.closingDate, 1) : addDays(addMonths(closing, -1), 1);
   return { cardId: card.id, start, closing, due, estimated, source };
+}
+
+/** Parcela ainda não lançada de uma compra parcelada anterior (ex.: 4/10 quando só 3/10 apareceu). */
+export interface ProjectedInstallment {
+  key: string;
+  description: string;
+  /** Valor positivo (compra). */
+  amount: number;
+  number: number;
+  total: number;
+  /** Mês de vencimento da fatura em que a parcela deve cair. */
+  month: string;
 }
 
 export interface CardBillSummary {
@@ -446,36 +480,188 @@ export interface CardBillSummary {
   cycle: CardCycle;
   /** Lançado até hoje no ciclo (compras − estornos). */
   launched: number;
-  /** Lançamentos futuros já conhecidos no ciclo (ex.: parcelas). */
+  /** Lançamentos futuros já conhecidos no ciclo (ex.: parcelas com data futura) + parcelas previstas. */
   future: number;
+  /** Parte de `future` que vem de parcelas previstas (compras parceladas de faturas anteriores). */
+  projectedAmount: number;
   total: number;
+  /** Lançamentos do ciclo aberto. */
   transactions: NormalizedTransaction[];
+  projected: ProjectedInstallment[];
+  /** Fatura com o mesmo vencimento informada pela instituição (quando existe). */
+  institutionBill: NormalizedBill | null;
+  /** De onde veio o total: soma das transações ou valor informado pela instituição (quando maior). */
+  totalSource: 'transactions' | 'institution';
+  /** Faturas seguintes (parcelas e lançamentos já conhecidos), até 12 meses. */
+  upcoming: FutureBill[];
 }
 
-/** Pertence ao ciclo aberto? Prioriza billForecast (Open Finance), depois a janela de datas; ignora itens de faturas fechadas (billId). */
-function inCycle(t: NormalizedTransaction, cycle: CardCycle, closedBillIds: Set<string>): boolean {
-  if (t.billId && closedBillIds.has(t.billId)) return false;
-  // billForecast (YYYY-MM) identifica o período da fatura; comparamos com o mês de vencimento do ciclo aberto.
-  if (t.billForecast) return t.billForecast === monthKey(cycle.due);
-  return t.date >= cycle.start && t.date <= cycle.closing;
+export interface FutureBill {
+  month: string;
+  due: DateKey;
+  /** Valor conhecido: lançamentos + parcelas previstas (ou a fatura da instituição, se maior). */
+  total: number;
+  /** Quantidade de lançamentos + parcelas previstas. */
+  count: number;
+  /** Parte do total que vem de parcelas previstas. */
+  projected: number;
+}
+
+function monthIndex(mk: string): number {
+  const [y, m] = mk.split('-').map(Number);
+  return (y ?? 1970) * 12 + ((m ?? 1) - 1);
+}
+
+function monthFromIndex(i: number): string {
+  const y = Math.floor(i / 12);
+  return `${y}-${String((i % 12) + 1).padStart(2, '0')}`;
+}
+
+/** Deslocamento em ciclos (0 = aberto, 1 = próximo, −1 = anterior…) de uma data em relação ao ciclo aberto. */
+function cycleOffsetByDate(date: DateKey, cycle: CardCycle): number {
+  if (date >= cycle.start && date <= cycle.closing) return 0;
+  if (date > cycle.closing) {
+    for (let k = 1; k <= 36; k++) if (date <= addMonths(cycle.closing, k)) return k;
+    return 37;
+  }
+  for (let k = -1; k >= -48; k--) if (date > addMonths(cycle.closing, k - 1)) return k;
+  return -49;
+}
+
+/** "LOJA X PARC 03/10" → "loja x" (para agrupar as parcelas de uma mesma compra). */
+function installmentBase(description: string): string {
+  return description
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\b\d{1,2}\s*(?:\/|de)\s*\d{1,2}\b/g, ' ')
+    .replace(/\b(parcela|parc|parcelado|parcelamento)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * Mês da fatura (mês de VENCIMENTO) a que cada transação do cartão pertence:
+ *  1. billId de uma fatura informada pela instituição → vencimento dessa fatura;
+ *  2. billForecast (Open Finance), calibrado contra as datas quando a instituição usa outro mês de referência;
+ *  3. parcela com data igual à da compra original → ciclo da compra + (n − 1);
+ *  4. janela de datas do ciclo.
+ */
+function assignBillMonths(txs: NormalizedTransaction[], cycle: CardCycle, billById: Map<string, NormalizedBill>): Map<string, string> {
+  const dueIdx = monthIndex(monthKey(cycle.due));
+  const byDate = (t: NormalizedTransaction): number => {
+    let k = cycleOffsetByDate(t.date, cycle);
+    if (t.installment && t.installment.number > 1 && t.purchaseDate && t.purchaseDate === t.date) k += t.installment.number - 1;
+    return dueIdx + k;
+  };
+  // Calibração do billForecast: compras à vista mostram se o mês informado é o do vencimento (0) ou outro (±1).
+  const diffs = new Map<number, number>();
+  let samples = 0;
+  for (const t of txs) {
+    if (!t.billForecast || t.installment || (t.billId && billById.has(t.billId))) continue;
+    const d = byDate(t) - monthIndex(t.billForecast);
+    if (Math.abs(d) > 1) continue;
+    diffs.set(d, (diffs.get(d) ?? 0) + 1);
+    samples++;
+  }
+  let offset = 0;
+  if (samples >= 3) {
+    const [best, n] = [...diffs.entries()].sort((a, b) => b[1] - a[1])[0]!;
+    if (n / samples >= 0.6) offset = best;
+  }
+  const out = new Map<string, string>();
+  for (const t of txs) {
+    const bill = t.billId ? billById.get(t.billId) : undefined;
+    const idx = bill ? monthIndex(monthKey(bill.dueDate)) : t.billForecast ? monthIndex(t.billForecast) + offset : byDate(t);
+    out.set(t.id, monthFromIndex(idx));
+  }
+  return out;
+}
+
+/** Parcelas que ainda não apareceram, projetadas a partir da última parcela conhecida de cada compra. */
+function projectInstallments(txs: NormalizedTransaction[], months: Map<string, string>, fromMonth: string): ProjectedInstallment[] {
+  const series = new Map<string, { last: NormalizedTransaction; month: string }>();
+  for (const t of txs) {
+    const inst = t.installment;
+    if (!inst || inst.total < 2 || inst.number < 1 || inst.number > inst.total || t.amount >= 0) continue;
+    const month = months.get(t.id);
+    if (!month) continue;
+    const key = [t.cardId, installmentBase(t.description), inst.total, t.purchaseDate ?? Math.round(-t.amount)].join('|');
+    const cur = series.get(key);
+    if (!cur || inst.number > cur.last.installment!.number) series.set(key, { last: t, month });
+  }
+  const from = monthIndex(fromMonth);
+  const out: ProjectedInstallment[] = [];
+  for (const [key, { last, month }] of series) {
+    const inst = last.installment!;
+    const base = monthIndex(month);
+    for (let n = inst.number + 1; n <= inst.total; n++) {
+      const idx = base + (n - inst.number);
+      if (idx < from) continue;
+      out.push({ key: `${key}#${n}`, description: last.description.replace(/\b\d{1,2}\s*\/\s*\d{1,2}\b/, `${n}/${inst.total}`), amount: -last.amount, number: n, total: inst.total, month: monthFromIndex(idx) });
+    }
+  }
+  return out;
 }
 
 export function calculateCurrentBills(cards: NormalizedCard[], transactions: NormalizedTransaction[], bills: NormalizedBill[], today: DateKey): CardBillSummary[] {
-  const closedIds = new Set(bills.map((b) => b.id));
   const out: CardBillSummary[] = [];
   for (const card of cards) {
     const cycle = getCardCycle(card, bills, today);
     if (!cycle) continue;
-    const txs = transactions.filter((t) => t.cardId === card.id && t.kind === 'expense' && !t.ignored && inCycle(t, cycle, closedIds));
+    const cardBills = bills.filter((b) => b.cardId === card.id);
+    const billById = new Map(cardBills.map((b) => [b.id, b]));
+    const txs = transactions.filter((t) => t.cardId === card.id && t.kind === 'expense' && !t.ignored);
+    const months = assignBillMonths(txs, cycle, billById);
+    const openMonth = monthKey(cycle.due);
+    const openIdx = monthIndex(openMonth);
+    const projected = projectInstallments(txs, months, openMonth);
+    const institutionBillFor = (mk: string) => cardBills.filter((b) => monthKey(b.dueDate) === mk).sort((a, b) => b.totalAmount - a.totalAmount)[0] ?? null;
+
+    const current = txs.filter((t) => months.get(t.id) === openMonth).sort((a, b) => a.date.localeCompare(b.date));
     let launched = 0;
     let future = 0;
-    for (const t of txs) {
+    for (const t of current) {
       const v = -t.amount; // compra positiva, estorno negativo
       // Com data até hoje (lançado ou pendente) = já lançado; data futura = parcela/lançamento futuro conhecido.
       if (t.date <= today) launched += v;
       else future += v;
     }
-    out.push({ card, cycle, launched: r2(launched), future: r2(future), total: r2(launched + future), transactions: txs.sort((a, b) => a.date.localeCompare(b.date)) });
+    const projectedNow = projected.filter((p) => p.month === openMonth);
+    const projectedAmount = projectedNow.reduce((s, p) => s + p.amount, 0);
+    future += projectedAmount;
+    const computed = r2(launched + future);
+    const institutionBill = institutionBillFor(openMonth);
+    const instAmount = institutionBill && institutionBill.currency === card.currency ? r2(institutionBill.totalAmount) : 0;
+    const totalSource = instAmount > computed ? 'institution' : 'transactions';
+
+    const upcoming: FutureBill[] = [];
+    for (let i = 1; i <= 12; i++) {
+      const mk = monthFromIndex(openIdx + i);
+      const known = txs.filter((t) => months.get(t.id) === mk);
+      const proj = projected.filter((p) => p.month === mk);
+      const knownTotal = known.reduce((s, t) => s + -t.amount, 0);
+      const projTotal = proj.reduce((s, p) => s + p.amount, 0);
+      const inst = institutionBillFor(mk);
+      const instTotal = inst && inst.currency === card.currency ? inst.totalAmount : 0;
+      const total = r2(Math.max(knownTotal + projTotal, instTotal));
+      if (known.length + proj.length === 0 && instTotal <= 0) continue;
+      upcoming.push({ month: mk, due: addMonths(cycle.due, i), total, count: known.length + proj.length, projected: r2(projTotal) });
+    }
+
+    out.push({
+      card,
+      cycle,
+      launched: r2(launched),
+      future: r2(future),
+      projectedAmount: r2(projectedAmount),
+      total: Math.max(computed, instAmount),
+      transactions: current,
+      projected: projectedNow,
+      institutionBill,
+      totalSource,
+      upcoming,
+    });
   }
   return out;
 }
@@ -494,7 +680,7 @@ export interface BillProjection {
 
 /**
  * Previsão da fatura aberta.
- *  - forecast = lançado + lançamentos futuros conhecidos (parcelas)
+ *  - forecast = lançado + lançamentos futuros conhecidos + parcelas previstas (ou o valor da instituição, se maior)
  *  - paceForecast = forecast + média diária de compras novas × dias restantes até o fechamento
  *    (parcelas de compras antigas não entram na média, para não inflar o ritmo)
  */
@@ -504,25 +690,32 @@ export function calculateProjectedBill(summary: CardBillSummary, today: DateKey)
   const daysElapsed = Math.max(1, diffDays(cycle.start, effectiveToday) + 1);
   const daysRemaining = Math.max(0, diffDays(effectiveToday, cycle.closing));
   const newPurchases = summary.transactions
-    .filter((t) => t.date <= effectiveToday && (!t.installment || t.installment.number === 1))
+    .filter((t) => t.date <= effectiveToday && t.date >= cycle.start && (!t.installment || t.installment.number === 1))
     .reduce((s, t) => s + -t.amount, 0);
   const dailyAverage = Math.max(0, newPurchases / daysElapsed);
-  const forecast = summary.launched + summary.future;
+  const forecast = summary.total;
   const paceForecast = forecast + dailyAverage * daysRemaining;
 
-  // Série diária acumulada (real até hoje; projeção linear depois).
+  // Série diária acumulada (real até hoje; projeção linear depois). Lançamentos fora da janela de datas
+  // (ex.: parcelas atribuídas pela fatura da instituição) entram no primeiro dia do ciclo.
   const byDay = new Map<DateKey, number>();
-  for (const t of summary.transactions) byDay.set(t.date, (byDay.get(t.date) ?? 0) + -t.amount);
+  for (const t of summary.transactions) {
+    const d = t.date < cycle.start ? cycle.start : t.date > cycle.closing ? cycle.closing : t.date;
+    byDay.set(d, (byDay.get(d) ?? 0) + -t.amount);
+  }
+  // Parcelas previstas e a diferença para o valor da instituição ainda não estão nas transações: entram no fechamento.
+  const extra = r2(summary.total - (summary.launched + summary.future) + summary.projectedAmount);
   const series: BillProjection['series'] = [];
   let acc = 0;
   let projected = 0;
   for (const d of eachDay(cycle.start, cycle.closing)) {
+    const atClose = d === cycle.closing ? extra : 0;
     if (d <= effectiveToday) {
-      acc += byDay.get(d) ?? 0;
+      acc += (byDay.get(d) ?? 0) + atClose;
       series.push({ date: d, actual: r2(acc), projected: d === effectiveToday ? r2(acc) : null });
       projected = acc;
     } else {
-      projected += dailyAverage + (byDay.get(d) ?? 0);
+      projected += dailyAverage + (byDay.get(d) ?? 0) + atClose;
       series.push({ date: d, actual: null, projected: r2(projected) });
     }
   }
@@ -538,25 +731,10 @@ export function calculateProjectedBill(summary: CardBillSummary, today: DateKey)
   };
 }
 
-/** Parcelas/lançamentos futuros além do ciclo aberto, agrupados por mês de vencimento estimado. */
-export function calculateFutureCardCharges(summary: CardBillSummary, transactions: NormalizedTransaction[], months = 6): Array<{ month: string; due: DateKey; total: number; count: number }> {
-  const out: Array<{ month: string; due: DateKey; total: number; count: number }> = [];
-  for (let i = 1; i <= months; i++) {
-    const closing = addMonths(summary.cycle.closing, i);
-    const start = addDays(addMonths(summary.cycle.closing, i - 1), 1);
-    const due = addMonths(summary.cycle.due, i);
-    let total = 0;
-    let count = 0;
-    for (const t of transactions) {
-      if (t.cardId !== summary.card.id || t.kind !== 'expense' || t.ignored) continue;
-      const match = t.billForecast ? t.billForecast === monthKey(due) : t.date >= start && t.date <= closing;
-      if (!match) continue;
-      total += -t.amount;
-      count++;
-    }
-    if (count > 0) out.push({ month: monthKey(due), due, total: r2(total), count });
-  }
-  return out;
+/** Faturas seguintes à aberta com o que já se sabe delas (lançamentos futuros e parcelas previstas). */
+export function calculateFutureCardCharges(summary: CardBillSummary, months = 6): FutureBill[] {
+  const limit = monthIndex(monthKey(summary.cycle.due)) + months;
+  return summary.upcoming.filter((f) => monthIndex(f.month) <= limit);
 }
 
 /** Soma das faturas abertas (lançado) de todos os cartões — é passivo, nunca ativo. */
@@ -611,14 +789,18 @@ export function buildProjectionEvents(input: {
     if (s.cycle.due > today && s.cycle.due <= end && s.total > 0) {
       events.push({ date: s.cycle.due, amount: -s.total, label: `Fatura ${s.card.label ?? s.card.name}`, kind: 'bill', certainty: s.cycle.estimated ? 'estimated' : 'confirmed', origin: 'bill' });
     }
-    for (const f of calculateFutureCardCharges(s, input.transactions, 4)) {
+    for (const f of calculateFutureCardCharges(s, 4)) {
       if (f.due > today && f.due <= end) {
         events.push({ date: f.due, amount: -f.total, label: `Parcelas futuras ${s.card.label ?? s.card.name}`, kind: 'bill', certainty: 'confirmed', origin: 'bill' });
       }
     }
   }
+  // Faturas da instituição a partir do mês da fatura aberta já estão nos totais acima (não conta duas vezes).
+  const openMonthOf = new Map(input.billSummaries.map((s) => [s.card.id, monthKey(s.cycle.due)]));
   for (const b of input.bills) {
     if (b.isPaid || b.currency !== base || b.dueDate <= today || b.dueDate > end) continue;
+    const om = openMonthOf.get(b.cardId);
+    if (om && monthKey(b.dueDate) >= om) continue;
     const remaining = r2(b.totalAmount - b.paidAmount);
     if (remaining > 0) events.push({ date: b.dueDate, amount: -remaining, label: 'Fatura fechada a pagar', kind: 'bill', certainty: 'confirmed', origin: 'bill' });
   }

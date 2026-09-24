@@ -1,4 +1,6 @@
+import path from 'node:path';
 import { defineConfig, type Plugin, type ProxyOptions } from 'vite';
+import { markProductionHtml, writeServiceWorker } from './scripts/pwa.mjs';
 
 /**
  * CashFlow — configuração do Vite.
@@ -31,6 +33,8 @@ const CSP = [
   "font-src 'self' data:",
   "connect-src 'self' https://api.pluggy.ai https://*.pluggy.ai",
   "frame-src https://connect.pluggy.ai https://*.pluggy.ai",
+  "worker-src 'self'",
+  "manifest-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -49,9 +53,31 @@ function cspPlugin(): Plugin {
   };
 }
 
+/**
+ * PWA: marca o HTML de produção (só ele registra o service worker) e gera dist/sw.js com a lista de
+ * arquivos do build. O service worker guarda apenas arquivos do app — nunca dados da Pluggy.
+ */
+function pwaPlugin(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'cashflow-pwa',
+    apply: 'build',
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir);
+    },
+    transformIndexHtml(html) {
+      return markProductionHtml(html);
+    },
+    closeBundle() {
+      const { version, count } = writeServiceWorker(outDir);
+      console.log(`[cashflow-pwa] service worker ${version} (${count} arquivos no precache)`);
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
-  plugins: [cspPlugin()],
+  plugins: [cspPlugin(), pwaPlugin()],
   server: {
     port: 5173,
     proxy: pluggyProxy,

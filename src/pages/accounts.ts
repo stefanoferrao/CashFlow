@@ -137,6 +137,7 @@ export function mount(ctx: PageContext): () => void {
                     (acc) => html`<div class="account-row">
                       <div class="stack-sm" style="gap:4px;min-width:0">
                         <div class="row" style="gap:6px;min-width:0">
+                          ${acc.logo ? instLogo(acc.logo, 'xs') : ''}
                           <strong class="truncate">${acc.name}</strong>
                           <button type="button" class="icon-btn icon-btn--xs" data-action="edit-identity" data-value="${id}" data-focus="${acc.id}" aria-label="Renomear ${acc.name}" data-tip="Renomear">${icon('pencil')}</button>
                         </div>

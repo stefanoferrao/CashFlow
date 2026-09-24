@@ -7,7 +7,7 @@ import { icon } from '../components/icons';
 import { confirmDialog, openModal } from '../components/modal';
 import { badge, categoryIcon, categoryLabel, instLogo, money, stateBlock } from '../components/ui';
 import { APP_CONFIG } from '../config/app.config';
-import { APP_CATEGORIES, TRANSACTION_KIND_LABEL, type AppCategoryId, type NormalizedTransaction } from '../models/finance';
+import { APP_CATEGORIES, TRANSACTION_KIND_LABEL, type AppCategoryId, type NormalizedAccount, type NormalizedCard, type NormalizedTransaction } from '../models/finance';
 import type { PageContext } from '../router';
 import { DEFAULT_SUBCATEGORIES } from '../services/categories';
 import { recurrenceKey } from '../services/recurrence';
@@ -54,14 +54,24 @@ export function mount(ctx: PageContext): () => void {
   const accountName = new Map<string, string>();
   const refreshLookups = () => {
     accountName.clear();
-    for (const a of store.state.dataset.accounts) accountName.set(a.id, a.name);
-    for (const c of store.state.dataset.cards) accountName.set(c.id, c.name);
+    productById.clear();
+    for (const a of store.state.dataset.accounts) {
+      accountName.set(a.id, a.name);
+      productById.set(a.id, a);
+    }
+    for (const c of store.state.dataset.cards) {
+      accountName.set(c.id, c.name);
+      productById.set(c.id, c);
+    }
   };
   const sourceName = (t: NormalizedTransaction) => accountName.get(t.accountId ?? t.cardId ?? '') ?? t.institution;
 
-  const instBadge = (itemId: string, name: string, size: 'xs' | 'sm') => {
-    const inst = institutionOf(itemId);
-    return instLogo(inst ?? { name, imageUrl: null, primaryColor: null }, size);
+  const productById = new Map<string, NormalizedCard | NormalizedAccount>();
+  const instBadge = (t: NormalizedTransaction, size: 'xs' | 'sm') => {
+    const product = productById.get(t.cardId ?? t.accountId ?? '');
+    if (product?.logo) return instLogo(product.logo, size);
+    const inst = institutionOf(t.itemId);
+    return instLogo(inst ?? { name: t.institution, imageUrl: null, primaryColor: null }, size);
   };
 
   const option = (value: string, label: string, current: string) => html`<option value="${value}" ${value === current ? 'selected' : ''}>${label}</option>`;
@@ -176,7 +186,7 @@ export function mount(ctx: PageContext): () => void {
                   (t) => html`<tr data-clickable data-action="open-tx" data-value="${t.id}" tabindex="0" aria-label="${t.description}, ${formatSignedMoney(t.amount, t.currency)}">
                     <td class="nowrap num">${formatDate(t.date)}</td>
                     <td><div class="tx-desc">${categoryIcon(t.category)}<div class="tx-desc__text"><strong title="${t.description}">${t.description}</strong><span class="row" style="gap:6px">${t.subcategory ?? t.providerCategory ?? ''}${txBadges(t)}</span></div></div></td>
-                    <td><div class="tx-desc">${instBadge(t.itemId, t.institution, 'sm')}<div class="tx-desc__text"><span style="font-size:13px;color:var(--text)">${sourceName(t)}</span><span>${t.institution}</span></div></div></td>
+                    <td><div class="tx-desc">${instBadge(t, 'sm')}<div class="tx-desc__text"><span style="font-size:13px;color:var(--text)">${sourceName(t)}</span><span>${t.institution}</span></div></div></td>
                     <td>${categoryLabel(t.category)}${t.userCategorized ? html` <span class="badge badge--accent" title="Alterada por você">editada</span>` : ''}</td>
                     <td><span class="muted" style="font-size:12px">${TRANSACTION_KIND_LABEL[t.kind]}</span></td>
                     <td class="num">${money(t.amount, { currency: t.currency, signed: true, tone: true })}</td>
@@ -191,7 +201,7 @@ export function mount(ctx: PageContext): () => void {
                 <div class="list">${g.items.map(
                   (t) => html`<button type="button" class="list-item" data-action="open-tx" data-value="${t.id}">
                     ${categoryIcon(t.category)}
-                    <span class="list-item__main"><span class="list-item__title">${t.description}</span><span class="list-item__sub"><span class="inst-name">${instBadge(t.itemId, t.institution, 'xs')}<span class="inst-name__text">${t.institution} · ${sourceName(t)} · ${categoryLabel(t.category)}</span></span></span></span>
+                    <span class="list-item__main"><span class="list-item__title">${t.description}</span><span class="list-item__sub"><span class="inst-name">${instBadge(t, 'xs')}<span class="inst-name__text">${t.institution} · ${sourceName(t)} · ${categoryLabel(t.category)}</span></span></span></span>
                     <span class="list-item__end">${money(t.amount, { currency: t.currency, signed: true, tone: true })}<span class="row" style="gap:4px">${txBadges(t)}</span></span>
                   </button>`,
                 )}</div>`,

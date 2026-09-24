@@ -16,6 +16,7 @@ import {
   type FinancialDataset,
   type IdentitySource,
   type InstitutionLogo,
+  type LogoView,
   type NormalizedAccount,
   type NormalizedCard,
   type NormalizedInstitution,
@@ -23,6 +24,7 @@ import {
   type UserLabels,
 } from '../models/finance';
 import { memoizeLast } from '../utils/async';
+import { KNOWN_ICON, bankIcon, bankIconByName, bankIconUrl, isAllowedLogoUrl, productIconFor, usableIconColor, type BankIcon } from './bankIcons';
 
 // ------------------------------------------------------------------ texto
 
@@ -51,7 +53,7 @@ export interface KnownInstitution {
 const K = (key: string, name: string, patterns: RegExp[], connector: RegExp): KnownInstitution => ({ key, name, patterns, connector });
 
 export const KNOWN_INSTITUTIONS: readonly KnownInstitution[] = [
-  K('nubank', 'Nubank', [/\bnubank\b/, /\bnu (pagamentos|financeira|invest|investimentos|holdings)\b/], /^nubank\b/),
+  K('nubank', 'Nubank', [/\bnubank\b/, /\bnu (pagamentos|financeira|invest|investimentos|holdings)\b/, /\bultravioleta\b/], /^nubank\b/),
   K('inter', 'Inter', [/\bbanco inter\b/, /\binter (dtvm|distribuidora|co|pf|pj)\b/, /\binter and co\b/], /^(banco )?inter\b/),
   K('itau', 'Itaú', [/\bitau\b/, /\bunibanco\b/], /^itau\b/),
   K('bradesco', 'Bradesco', [/\bbradesco\b/], /^bradesco\b/),
@@ -96,7 +98,24 @@ export const KNOWN_INSTITUTIONS: readonly KnownInstitution[] = [
   K('ailos', 'Ailos', [/\bailos\b/], /^ailos\b/),
   K('stone', 'Stone', [/\bstone (pagamentos|instituicao)\b/], /^stone\b/),
   K('infinitepay', 'InfinitePay', [/\binfinitepay\b/, /\bcloudwalk\b/], /^infinitepay\b/),
+  K('banestes', 'Banestes', [/\bbanestes\b/], /^banestes\b/),
+  K('banpara', 'Banpará', [/\bbanpara\b/, /\bbanco do (estado do )?para\b/], /^banpara\b/),
+  K('banese', 'Banese', [/\bbanese\b/], /^banese\b/),
+  K('bnb', 'Banco do Nordeste', [/\bbanco do nordeste\b/], /^banco do nordeste\b/),
+  K('basa', 'Banco da Amazônia', [/\bbanco da amazonia\b/], /^banco da amazonia\b/),
+  K('cora', 'Cora', [/\bcora (scd|sociedade|pagamentos)\b/], /^cora\b/),
+  K('efi', 'Efí Bank', [/\befi (bank|s a|instituicao)\b/, /\bgerencianet\b/], /^efi\b/),
+  K('warren', 'Warren', [/\bwarren (investimentos|corretora|brasil)\b/], /^warren\b/),
+  K('citi', 'Citibank', [/\bcitibank\b/], /^citi/),
+  K('bs2', 'Banco BS2', [/\bbanco bs2\b/], /^(banco )?bs2\b/),
+  K('wise', 'Wise', [/\bwise (brasil|payments)\b/], /^wise\b/),
+  K('n26', 'N26', [/\bn26\b/], /^n26\b/),
 ];
+
+/** Ícone local (biblioteca react-bancos) de uma instituição conhecida. */
+export function iconOfKnown(k: KnownInstitution | null | undefined): BankIcon | null {
+  return k ? bankIcon(KNOWN_ICON[k.key]) : null;
+}
 
 export function matchKnown(text: string | null | undefined): KnownInstitution | null {
   const t = norm(text);
@@ -335,13 +354,15 @@ export interface ResolvedIdentity {
   logo: InstitutionLogo;
   icon: string | null;
   imageUrl: string | null;
+  /** Ícone local em uso (slug), quando houver. */
+  bank: string | null;
   initials: string;
   connectorName: string;
   via: string | null;
   source: IdentitySource;
   detectedFrom: string | null;
   /** Sugestão automática (mesmo quando o usuário já personalizou) — usada no editor. */
-  suggestion: { name: string; connector: ConnectorInfo | null; from: string } | null;
+  suggestion: { name: string; connector: ConnectorInfo | null; bank: string | null; from: string } | null;
 }
 
 /** Evidências de um Item para a detecção (a partir dos dados ORIGINAIS, antes de qualquer rótulo). */
@@ -365,13 +386,15 @@ export function resolveIdentity(item: NormalizedItem, evidence: Evidence[], labe
   const aggregator = isAggregatorConnector(inst);
   const det = aggregator ? detectInstitution(evidence) : null;
   const detConnector = det ? findConnector(det.known, connectors) : null;
-  const suggestion = det ? { name: det.known.name, connector: detConnector, from: det.from } : null;
+  const detIcon = det ? iconOfKnown(det.known) : null;
+  const suggestion = det ? { name: det.known.name, connector: detConnector, bank: detIcon?.slug ?? null, from: det.from } : null;
   const via = aggregator ? prettyConnectorName(connectorName) : null;
 
   const user = labels.identities[item.id];
   if (user && user.name.trim()) {
-    const color = toHexColor(user.color) ?? fallbackColor(user.name);
-    const imageUrl = user.imageUrl && /^https:\/\//.test(user.imageUrl) ? user.imageUrl : null;
+    const icon = bankIcon(user.bank);
+    const imageUrl = icon ? bankIconUrl(icon.slug) : isAllowedLogoUrl(user.imageUrl) ? user.imageUrl : null;
+    const color = toHexColor(user.color) ?? usableIconColor(icon) ?? fallbackColor(user.name);
     const logo: InstitutionLogo = user.logo === 'image' && !imageUrl ? 'initials' : user.logo;
     return {
       name: user.name.trim(),
@@ -380,6 +403,7 @@ export function resolveIdentity(item: NormalizedItem, evidence: Evidence[], labe
       logo,
       icon: user.icon,
       imageUrl,
+      bank: logo === 'image' ? (icon?.slug ?? null) : null,
       initials: initialsOf(user.name),
       connectorName,
       via: via ?? (norm(user.name) !== norm(connectorName) ? connectorName : null),
@@ -390,14 +414,17 @@ export function resolveIdentity(item: NormalizedItem, evidence: Evidence[], labe
   }
 
   if (det) {
-    const color = toHexColor(detConnector?.primaryColor) ?? fallbackColor(det.known.name);
+    // Ícone local primeiro (sem requisição a terceiros); depois o logo do catálogo da Pluggy.
+    const imageUrl = detIcon ? bankIconUrl(detIcon.slug) : (detConnector?.imageUrl ?? null);
+    const color = toHexColor(detConnector?.primaryColor) ?? usableIconColor(detIcon) ?? fallbackColor(det.known.name);
     return {
       name: det.known.name,
       color,
       textColor: readableTextOn(color),
-      logo: detConnector?.imageUrl ? 'image' : 'initials',
+      logo: imageUrl ? 'image' : 'initials',
       icon: null,
-      imageUrl: detConnector?.imageUrl ?? null,
+      imageUrl,
+      bank: detIcon?.slug ?? null,
       initials: initialsOf(det.known.name),
       connectorName,
       via,
@@ -408,14 +435,17 @@ export function resolveIdentity(item: NormalizedItem, evidence: Evidence[], labe
   }
 
   const name = aggregator ? prettyConnectorName(connectorName) : connectorName;
-  const color = toHexColor(inst.primaryColor) ?? fallbackColor(connectorName);
+  const localIcon = aggregator ? null : (iconOfKnown(matchKnown(connectorName)) ?? bankIconByName(connectorName));
+  const imageUrl = localIcon ? bankIconUrl(localIcon.slug) : inst.imageUrl;
+  const color = toHexColor(inst.primaryColor) ?? usableIconColor(localIcon) ?? fallbackColor(connectorName);
   return {
     name,
     color,
     textColor: readableTextOn(color),
-    logo: inst.imageUrl ? 'image' : 'initials',
+    logo: imageUrl ? 'image' : 'initials',
     icon: null,
-    imageUrl: inst.imageUrl,
+    imageUrl,
+    bank: localIcon?.slug ?? null,
     initials: initialsOf(name),
     connectorName,
     via: null,
@@ -423,6 +453,16 @@ export function resolveIdentity(item: NormalizedItem, evidence: Evidence[], labe
     detectedFrom: null,
     suggestion,
   };
+}
+
+/** Logo pronto para exibir a partir de um ícone local ou imagem enviada. */
+export function logoViewOf(name: string, bank: string | null | undefined, imageUrl: string | null | undefined, fallbackColorHex: string): LogoView | null {
+  const icon = bankIcon(bank);
+  const url = icon ? bankIconUrl(icon.slug) : isAllowedLogoUrl(imageUrl) ? imageUrl : null;
+  if (!url) return null;
+  const color = usableIconColor(icon) ?? fallbackColorHex;
+  const label = icon?.name ?? name;
+  return { name: label, imageUrl: url, primaryColor: color, logo: 'image', icon: null, initials: initialsOf(label), textColor: readableTextOn(color) };
 }
 
 function presentInstitution(inst: NormalizedInstitution, id: ResolvedIdentity): NormalizedInstitution {
@@ -443,35 +483,47 @@ function presentInstitution(inst: NormalizedInstitution, id: ResolvedIdentity): 
 }
 
 function applyIdentitiesImpl(ds: FinancialDataset, labels: UserLabels, connectors: readonly ConnectorInfo[]): FinancialDataset {
-  if (!ds.items.length && !Object.keys(labels.nicknames).length && !Object.keys(labels.cardCycles).length) return ds;
+  if (!ds.items.length && !Object.keys(labels.nicknames).length && !Object.keys(labels.cardCycles).length && !Object.keys(labels.productLogos).length) return ds;
   const ids = new Map<string, ResolvedIdentity>();
   for (const item of ds.items) ids.set(item.id, resolveIdentity(item, evidenceFor(ds, item), labels, connectors));
   const instOf = (itemId: string, fallback: string) => ids.get(itemId)?.name ?? fallback;
   const connOf = (itemId: string) => ids.get(itemId)?.connectorName;
   const nick = (id: string) => labels.nicknames[id]?.trim() || null;
+  const own = (id: string, name: string, fallback: string) => {
+    const p = labels.productLogos[id];
+    return p && !p.inherit ? logoViewOf(name, p.bank, p.imageUrl, fallback) : null;
+  };
 
   const accounts = ds.accounts.map((a) => {
     const institution = instOf(a.itemId, a.institution);
     const nickname = nick(a.id);
     const name = nickname ?? defaultAccountName(a, connOf(a.itemId));
-    return { ...a, institution, name, rawName: a.name, nickname, label: `${institution} · ${name}` };
+    const logo = own(a.id, name, ids.get(a.itemId)?.color ?? '#64748B');
+    return { ...a, institution, name, rawName: a.name, nickname, label: `${institution} · ${name}`, logo };
   });
   const cards = ds.cards.map((c) => {
     const institution = instOf(c.itemId, c.institution);
     const nickname = nick(c.id);
     const name = nickname ?? defaultCardName(c, connOf(c.itemId));
-    const color = ids.get(c.itemId)?.color ?? c.institutionColor;
+    const id = ids.get(c.itemId);
+    const instColor = id?.color ?? c.institutionColor ?? '#1F2937';
     const cyc = labels.cardCycles[c.id];
+    // Logo do cartão: escolhido pelo usuário > produto reconhecido pelo nome/nível (ex.: "Ultravioleta") > instituição.
+    const userLogo = own(c.id, name, instColor);
+    const product = userLogo || labels.productLogos[c.id]?.inherit ? null : productIconFor(id?.bank, [c.name, c.brand, c.level].filter(Boolean).join(' '));
+    const logo = userLogo ?? (product ? logoViewOf(name, product.slug, null, instColor) : null);
     return {
       ...c,
       institution,
-      institutionColor: color,
+      institutionColor: logo?.primaryColor ?? instColor,
       name,
       rawName: c.name,
       nickname,
       label: `${institution} · ${name}`,
       manualClosingDay: validDay(cyc?.closingDay),
       manualDueDay: validDay(cyc?.dueDay),
+      logo,
+      logoSource: userLogo ? ('user' as const) : product ? ('detected' as const) : null,
     };
   });
   return {
