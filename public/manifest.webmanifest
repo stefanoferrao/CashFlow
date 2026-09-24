@@ -1,0 +1,28 @@
+{
+  "id": "./",
+  "name": "CashFlow — Finanças pessoais",
+  "short_name": "CashFlow",
+  "description": "Veja em um só lugar onde está o seu dinheiro. Dados da Pluggy, processados somente no seu aparelho.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0F1115",
+  "theme_color": "#0F1115",
+  "categories": ["finance", "productivity"],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Faturas", "short_name": "Faturas", "description": "Fatura aberta e próximas faturas", "url": "./#/faturas", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Transações", "short_name": "Extrato", "description": "Extrato de contas e cartões", "url": "./#/transacoes", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Cartões", "short_name": "Cartões", "description": "Limites e faturas dos cartões", "url": "./#/cartoes", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ]
+}
