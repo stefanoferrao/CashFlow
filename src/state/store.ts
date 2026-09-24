@@ -4,11 +4,14 @@
  */
 import type { VaultMode } from '../security/vault';
 import {
+  type ConnectorInfo,
   type FinancialDataset,
   type PlannedEntry,
   type UserCategorization,
+  type UserLabels,
   emptyCategorization,
   emptyDataset,
+  emptyLabels,
 } from '../models/finance';
 import type { PluggyErrorKind } from '../pluggy/errors';
 import { DEFAULT_PREFERENCES, type ThemePref, type UserPreferences } from '../storage/preferences';
@@ -38,7 +41,14 @@ export interface ConnectionState {
 
 export interface AppState {
   mode: AppMode;
+  /** Dataset APRESENTADO: dados normalizados + identidades/apelidos aplicados. É o que as páginas usam. */
   dataset: FinancialDataset;
+  /** Dados normalizados originais (cache/sincronização), antes das identidades. */
+  baseDataset: FinancialDataset;
+  /** Identidades das conexões e apelidos de contas/cartões (definidos pelo usuário). */
+  labels: UserLabels;
+  /** Catálogo de conectores da Pluggy (logo e cor das instituições). */
+  connectors: ConnectorInfo[];
   categorization: UserCategorization;
   planned: PlannedEntry[];
   itemIds: string[];
@@ -54,6 +64,9 @@ export interface AppState {
 export const initialState = (): AppState => ({
   mode: 'booting',
   dataset: emptyDataset(),
+  baseDataset: emptyDataset(),
+  labels: emptyLabels(),
+  connectors: [],
   categorization: emptyCategorization(),
   planned: [],
   itemIds: [],
@@ -78,7 +91,7 @@ class Store {
   set(patch: Partial<AppState> | ((s: AppState) => Partial<AppState>)): void {
     const prev = this.current;
     const p = typeof patch === 'function' ? patch(prev) : patch;
-    const dataChanged = 'dataset' in p || 'categorization' in p || 'planned' in p;
+    const dataChanged = 'dataset' in p || 'categorization' in p || 'planned' in p || 'labels' in p;
     this.current = { ...prev, ...p, dataVersion: dataChanged ? prev.dataVersion + 1 : prev.dataVersion };
     for (const l of this.listeners) l(this.current, prev);
   }

@@ -4,13 +4,13 @@
 import { html, type SafeHtml } from '../components/dom';
 import { icon } from '../components/icons';
 import { openModal } from '../components/modal';
-import { stateBlock } from '../components/ui';
+import { instName, stateBlock } from '../components/ui';
 import { computeAnalytics, type Analytics } from '../services/analytics';
 import * as actions from '../state/actions';
 import { notify } from '../state/notify';
 import { store, type AppState } from '../state/store';
 import { toPluggyError } from '../pluggy/errors';
-import type { InvestmentClass } from '../models/finance';
+import type { InvestmentClass, NormalizedInstitution } from '../models/finance';
 
 /** Índice da paleta por entidade (fixo — a cor segue a entidade, nunca a posição/ranking). */
 export const CLASS_COLOR: Record<'contas' | InvestmentClass, number> = { contas: 1, renda_fixa: 2, fundos: 3, acoes: 4, etfs: 5, previdencia: 6, outros: 7 };
@@ -32,6 +32,23 @@ export function onDataChange(fn: (s: AppState, prev: AppState) => void): () => v
       fn(s, prev);
     }
   });
+}
+
+/** Instituição (já com a identidade aplicada) de um Item. */
+const instCache = new WeakMap<object, Map<string, NormalizedInstitution>>();
+export function institutionOf(itemId: string, s: AppState = store.state): NormalizedInstitution | null {
+  let map = instCache.get(s.dataset.items);
+  if (!map) {
+    map = new Map(s.dataset.items.map((i) => [i.id, i.institution]));
+    instCache.set(s.dataset.items, map);
+  }
+  return map.get(itemId) ?? null;
+}
+
+/** Logo + nome da instituição de um Item (fallback: só o nome). */
+export function instLabel(itemId: string, fallbackName: string, size: 'xs' | 'sm' = 'xs'): SafeHtml {
+  const inst = institutionOf(itemId);
+  return instName(inst ?? { name: fallbackName, imageUrl: null, primaryColor: null }, { size });
 }
 
 export function hasAnyData(s: AppState = store.state): boolean {
@@ -85,6 +102,8 @@ export const commonHandlers: Record<string, (el: HTMLElement, ev: Event) => void
   'sync-now': () => void actions.syncAll(),
   'add-institution': () => openAddInstitution(),
   'start-demo': () => actions.startDemo(),
+  'edit-identity': (el) => void import('./identity').then((m) => m.openInstitutionEditor(el.dataset.value!, el.dataset.focus)),
+  'edit-card-cycle': (el) => void import('./identity').then((m) => m.openCardCycleEditor(el.dataset.value!)),
   'toggle-table': (el) => {
     const id = el.dataset.target!;
     const frame = document.getElementById(id);

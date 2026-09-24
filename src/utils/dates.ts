@@ -67,6 +67,17 @@ export function daysInMonth(key: DateKey): number {
   return new Date(y, m, 0).getDate();
 }
 
+/** Primeira data ≥ `from` cujo dia do mês é `day` (em meses mais curtos, o último dia). */
+export function nextDayOfMonth(from: DateKey, day: number): DateKey {
+  const start = monthStart(from);
+  for (let i = 0; i < 3; i++) {
+    const ms = addMonths(start, i);
+    const cand = `${ms.slice(0, 7)}-${String(Math.min(day, daysInMonth(ms))).padStart(2, '0')}`;
+    if (cand >= from) return cand;
+  }
+  return from;
+}
+
 /** Início da semana (segunda-feira). */
 export function weekStart(key: DateKey): DateKey {
   const dt = keyToDate(key);

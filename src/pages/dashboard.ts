@@ -15,7 +15,7 @@ import { store } from '../state/store';
 import { clearLayout, loadLayout, saveLayout, type DashboardLayout, type WidgetLayout } from '../storage/preferences';
 import { addDays, diffDays, monthEnd } from '../utils/dates';
 import { formatDate, formatMoney, formatMonthKeyShort, formatPercent, formatShortDate } from '../utils/format';
-import { CLASS_COLOR, analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, noDataState, onDataChange, openAddInstitution, tableToggle } from './shared';
+import { CLASS_COLOR, analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, instLabel, noDataState, onDataChange, openAddInstitution, tableToggle } from './shared';
 
 const LAYOUT_VERSION = 3;
 const GRID_MIN_WIDTH = 1100;
@@ -92,12 +92,17 @@ const WIDGETS: WidgetDef[] = [
     render: (a) => {
       const accounts = store.state.dataset.accounts;
       const byInst = new Map<string, number>();
-      for (const acc of accounts) if (acc.currency === 'BRL') byInst.set(acc.institution, (byInst.get(acc.institution) ?? 0) + acc.balance);
+      const itemOfInst = new Map<string, string>();
+      for (const acc of accounts) {
+        if (acc.currency !== 'BRL') continue;
+        byInst.set(acc.institution, (byInst.get(acc.institution) ?? 0) + acc.balance);
+        if (!itemOfInst.has(acc.institution)) itemOfInst.set(acc.institution, acc.itemId);
+      }
       const others = Object.entries(a.totalBalance.others);
       return html`${cardHead('Saldo em contas', 'wallet', infoTip('Somente contas bancárias. Não inclui investimentos, limite de cartão nem valor de fatura.'))}
         <div class="figure">${figureValue(a.totalBalance.base)}<div class="figure__meta">${accounts.length} ${accounts.length === 1 ? 'conta' : 'contas'} bancárias</div></div>
         <div class="kv-list">
-          ${[...byInst.entries()].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([name, v]) => kv(name, money(v)))}
+          ${[...byInst.entries()].sort((x, y) => y[1] - x[1]).slice(0, 4).map(([name, v]) => kv(instLabel(itemOfInst.get(name) ?? '', name), money(v)))}
           ${others.map(([cur, v]) => kv(`Em ${cur} (não somado)`, money(v, { currency: cur })))}
         </div>
         ${accounts.length ? '' : na('Nenhuma conta bancária encontrada')}
@@ -208,10 +213,14 @@ const WIDGETS: WidgetDef[] = [
     visibleByDefault: true,
     render: (a) => {
       const next = [...a.bills].sort((x, y) => x.cycle.due.localeCompare(y.cycle.due))[0];
-      if (!next) return html`${cardHead('Fatura atual', 'receipt')}${na(store.state.dataset.cards.length ? 'Datas de fechamento não informadas pela instituição' : 'Nenhum cartão de crédito conectado')}`;
+      if (!next) {
+        const hasCards = store.state.dataset.cards.length > 0;
+        return html`${cardHead('Fatura atual', 'receipt')}${na(hasCards ? 'Datas de fechamento não informadas pela instituição' : 'Nenhum cartão de crédito conectado')}
+          ${hasCards ? html`<div class="card__foot"><a href="#/configuracoes?secao=cartoes">Definir fechamento e vencimento</a>${icon('chevronRight')}</div>` : ''}`;
+      }
       const p = a.billProjections[next.card.id]!;
       const days = diffDays(a.today, next.cycle.due);
-      return html`${cardHead(`Fatura atual · ${next.card.name}`, 'receipt', next.cycle.estimated ? badge('Datas estimadas', 'warn', 'info') : badge(days <= 0 ? 'Vence hoje' : `Vence em ${days} d`, days <= 5 ? 'warn' : 'neutral', 'calendar'))}
+      return html`${cardHead(`Fatura atual · ${next.card.label ?? next.card.name}`, 'receipt', next.cycle.estimated ? badge('Datas estimadas', 'warn', 'info') : badge(days <= 0 ? 'Vence hoje' : `Vence em ${days} d`, days <= 5 ? 'warn' : 'neutral', 'calendar'))}
         <div class="split">
           <div class="figure">
             <span class="figure__label">Valor acumulado</span>

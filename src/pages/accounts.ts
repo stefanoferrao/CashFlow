@@ -6,7 +6,7 @@ import { animateNumbers, delegate, html, render, type SafeHtml } from '../compon
 import { icon } from '../components/icons';
 import { confirmDialog } from '../components/modal';
 import { badge, figureValue, infoTip, instLogo, money, na, segmented } from '../components/ui';
-import type { NormalizedAccount, NormalizedItem } from '../models/finance';
+import { ACCOUNT_TYPE_LABEL, type NormalizedItem } from '../models/finance';
 import type { PageContext } from '../router';
 import { reconstructBalanceHistory } from '../services/financialCalculator';
 import * as actions from '../state/actions';
@@ -15,7 +15,6 @@ import { addDays } from '../utils/dates';
 import { formatDate, formatDateTime, formatMoney, formatRelative, formatShortDate } from '../utils/format';
 import { analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, noDataState, onDataChange, openAddInstitution, tableToggle } from './shared';
 
-const TYPE_LABEL: Record<NormalizedAccount['type'], string> = { checking: 'Conta corrente', savings: 'Poupança', other: 'Conta' };
 
 export function itemStatusBadge(item: NormalizedItem | null, syncingAll: boolean): SafeHtml {
   if (syncingAll) return badge('Sincronizando', 'info', 'refresh');
@@ -53,6 +52,7 @@ export function mount(ctx: PageContext): () => void {
     // Items registrados sem dados ainda também aparecem.
     const itemIds = demo ? ds.items.map((i) => i.id) : Array.from(new Set([...s.itemIds, ...ds.items.map((i) => i.id)]));
     const syncingAll = s.sync.status === 'syncing';
+    const unidentified = ds.items.filter((i) => i.institution.identitySource === 'unidentified');
 
     render(
       root,
@@ -91,28 +91,37 @@ export function mount(ctx: PageContext): () => void {
 
         <section class="section">
           <div class="section__head"><h2 class="section__title">Instituições</h2><span class="muted" style="font-size:13px">${itemIds.length} conectada(s)</span></div>
+          ${unidentified.length
+            ? html`<div class="callout callout--warn">${icon('info')}<div><strong>${unidentified.length === 1 ? '1 conexão do Meu Pluggy sem banco identificado.' : `${unidentified.length} conexões do Meu Pluggy sem banco identificado.`}</strong> O Meu Pluggy não informa o banco de origem. Use <strong>Personalizar</strong> para dar nome, logo e cor — eles passam a valer em todo o app.</div></div>`
+            : ''}
           ${itemIds.map((id) => {
             const item = ds.items.find((i) => i.id === id) ?? null;
             const accounts = ds.accounts.filter((x) => x.itemId === id);
             const cards = ds.cards.filter((x) => x.itemId === id).length;
             const invs = ds.investments.filter((x) => x.itemId === id).length;
-            const name = item?.institution.name ?? 'Instituição (aguardando dados)';
+            const inst = item?.institution;
+            const name = inst?.name ?? 'Instituição (aguardando dados)';
+            const src = inst?.identitySource;
             return html`<article class="card card--flush inst-group">
               <div class="inst-group__head">
                 <div class="inst-group__title">
-                  ${instLogo(item?.institution ?? { name, imageUrl: null, primaryColor: null })}
+                  ${instLogo(inst ?? { name, imageUrl: null, primaryColor: null })}
                   <div class="stack-sm" style="gap:2px;min-width:0">
                     <strong class="truncate">${name}</strong>
-                    <span class="muted" style="font-size:12px">${accounts.length} conta(s) · ${cards} cartão(ões) · ${invs} investimento(s)${item?.institution.isOpenFinance ? ' · Open Finance' : ''}</span>
+                    <span class="muted" style="font-size:12px">${inst?.via ? html`<span class="inst-group__via">via ${inst.via}</span> · ` : ''}${accounts.length} conta(s) · ${cards} cartão(ões) · ${invs} investimento(s)${inst?.isOpenFinance ? ' · Open Finance' : ''}</span>
+                    ${src === 'detected' ? html`<span class="muted inline-note">${icon('sparkle')}Banco identificado automaticamente</span>` : ''}
                   </div>
                 </div>
                 <div class="row wrap">
+                  ${src === 'unidentified' ? badge('Banco não identificado', 'warn', 'alert') : ''}
                   ${itemStatusBadge(item, syncingAll)}
+                  ${item ? html`<button type="button" class="btn btn--secondary btn--sm" data-action="edit-identity" data-value="${id}">${icon('palette')}Personalizar</button>` : ''}
                   ${demo
                     ? ''
                     : html`<div class="menu-wrap">
                         <button type="button" class="icon-btn icon-btn--sm icon-btn--outline" data-action="item-menu" data-value="${id}" aria-haspopup="menu" aria-label="Ações para ${name}">${icon('more')}</button>
                         <div class="menu" role="menu" data-item-menu="${id}">
+                          ${item ? html`<button type="button" class="menu__item" role="menuitem" data-action="edit-identity" data-value="${id}">${icon('palette')}Personalizar nome e aparência</button>` : ''}
                           <button type="button" class="menu__item" role="menuitem" data-action="item-sync" data-value="${id}">${icon('refresh')}Atualizar dados</button>
                           <button type="button" class="menu__item" role="menuitem" data-action="item-refresh" data-value="${id}">${icon('zap')}Solicitar coleta na instituição</button>
                           <button type="button" class="menu__item" role="menuitem" data-action="item-reconnect" data-value="${id}">${icon('plug')}Reconectar</button>
@@ -127,9 +136,13 @@ export function mount(ctx: PageContext): () => void {
                 ? accounts.map(
                     (acc) => html`<div class="account-row">
                       <div class="stack-sm" style="gap:4px;min-width:0">
-                        <strong class="truncate">${acc.name}</strong>
+                        <div class="row" style="gap:6px;min-width:0">
+                          <strong class="truncate">${acc.name}</strong>
+                          <button type="button" class="icon-btn icon-btn--xs" data-action="edit-identity" data-value="${id}" data-focus="${acc.id}" aria-label="Renomear ${acc.name}" data-tip="Renomear">${icon('pencil')}</button>
+                        </div>
                         <div class="account-row__meta">
-                          <span>${TYPE_LABEL[acc.type]}</span>
+                          <span>${ACCOUNT_TYPE_LABEL[acc.type]}</span>
+                          ${acc.rawName && acc.rawName !== acc.name ? html`<span>Na instituição: ${acc.rawName}</span>` : ''}
                           ${acc.lastDigits ? html`<span class="sensitive">•••• ${acc.lastDigits}</span>` : ''}
                           ${acc.currency !== 'BRL' ? html`<span>${acc.currency}</span>` : ''}
                           ${acc.overdraftLimit ? html`<span>Cheque especial: ${formatMoney(acc.overdraftUsed ?? 0)} de ${formatMoney(acc.overdraftLimit)}</span>` : ''}

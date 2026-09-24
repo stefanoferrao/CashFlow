@@ -5,7 +5,7 @@
 import { delegate, html, render, type SafeHtml } from '../components/dom';
 import { icon } from '../components/icons';
 import { confirmDialog, openModal } from '../components/modal';
-import { badge, segmented } from '../components/ui';
+import { badge, instLogo, na, segmented } from '../components/ui';
 import { APP_CONFIG } from '../config/app.config';
 import { toPluggyError } from '../pluggy/errors';
 import { passphraseStrength } from '../security/crypto';
@@ -18,11 +18,13 @@ import { isPersistent } from '../storage/db';
 import { formatDateTime, formatRelative } from '../utils/format';
 import { commonHandlers, openAddInstitution } from './shared';
 import { itemStatusBadge } from './accounts';
+import { dayOptions, institutionDatesText } from './identity';
 import type { PageContext } from '../router';
 
 const SECTIONS: Array<[string, string]> = [
   ['conta', 'Conta'],
   ['pluggy', 'Pluggy'],
+  ['cartoes', 'Cartões'],
   ['seguranca', 'Segurança'],
   ['aparencia', 'Aparência'],
   ['dashboard', 'Dashboard'],
@@ -50,6 +52,12 @@ export function mount(ctx: PageContext): () => void {
   };
 
   const paint = () => {
+    // Preserva o foco em selects/controles ao repintar (acessibilidade por teclado).
+    const active = document.activeElement as HTMLElement | null;
+    const focusKey =
+      active && root.contains(active) && active.dataset.change
+        ? `[data-change="${active.dataset.change}"]${active.dataset.card ? `[data-card="${CSS.escape(active.dataset.card)}"][data-kind="${active.dataset.kind ?? ''}"]` : ''}`
+        : null;
     const s = store.state;
     const demo = s.mode === 'demo';
     const c = s.connection;
@@ -97,13 +105,35 @@ export function mount(ctx: PageContext): () => void {
                 ${s.itemIds.length
                   ? html`<div class="list">${s.itemIds.map((id) => {
                       const it = ds.items.find((i) => i.id === id) ?? null;
-                      return html`<div class="list-item"><span class="inst-logo">${icon('bank')}</span>
-                        <span class="list-item__main"><span class="list-item__title">${it?.institution.name ?? 'Aguardando sincronização'}</span><span class="list-item__sub"><code>${id.slice(0, 8)}…${id.slice(-4)}</code></span></span>
+                      return html`<div class="list-item">${it ? instLogo(it.institution) : html`<span class="inst-logo">${icon('bank')}</span>`}
+                        <span class="list-item__main"><span class="list-item__title">${it?.institution.name ?? 'Aguardando sincronização'}</span><span class="list-item__sub">${it?.institution.via ? `via ${it.institution.via} · ` : ''}<code>${id.slice(0, 8)}…${id.slice(-4)}</code></span></span>
                         ${itemStatusBadge(it, s.sync.status === 'syncing')}
+                        ${it ? html`<button class="icon-btn icon-btn--sm" data-action="edit-identity" data-value="${id}" aria-label="Personalizar ${it.institution.name}" data-tip="Personalizar">${icon('palette')}</button>` : ''}
                         <button class="icon-btn icon-btn--sm" data-action="remove-item" data-value="${id}" aria-label="Remover ${it?.institution.name ?? id} deste navegador">${icon('trash')}</button></div>`;
                     })}</div>`
                   : ''}
               </div>`}
+          </section>
+
+          <section class="card settings-section" id="set-cartoes">
+            <div class="card__title card__title--lg">${icon('card')}Cartões de crédito</div>
+            <p class="muted" style="font-size:13px;margin-top:8px">Quando a instituição não informa o fechamento e o vencimento da fatura, defina os dias aqui. Eles passam a valer na fatura atual, na previsão de fechamento, no melhor dia de compra e no saldo projetado. Datas informadas pela instituição têm prioridade.</p>
+            ${ds.cards.length
+              ? ds.cards.map((card) => {
+                  const it = ds.items.find((i) => i.id === card.itemId);
+                  const both = !!(card.closingDate && card.dueDate);
+                  return html`<div class="setting-row">
+                    <div class="setting-row__text">
+                      <strong class="inst-name">${instLogo(it?.institution ?? { name: card.institution, imageUrl: null, primaryColor: card.institutionColor }, 'xs')}<span class="inst-name__text">${card.label ?? card.name}${card.lastFourDigits ? ` · final ${card.lastFourDigits}` : ''}</span></strong>
+                      <span>${institutionDatesText(card)}</span>
+                    </div>
+                    <div class="row wrap">
+                      <label class="field"><span class="field__label">Fechamento</span><select class="select select--sm" data-change="card-cycle" data-card="${card.id}" data-kind="closing" aria-label="Dia de fechamento — ${card.label ?? card.name}">${dayOptions(card.manualClosingDay, both ? 'Da instituição' : 'Não definido')}</select></label>
+                      <label class="field"><span class="field__label">Vencimento</span><select class="select select--sm" data-change="card-cycle" data-card="${card.id}" data-kind="due" aria-label="Dia de vencimento — ${card.label ?? card.name}">${dayOptions(card.manualDueDay, both ? 'Da instituição' : 'Não definido')}</select></label>
+                    </div>
+                  </div>`;
+                })
+              : na('Nenhum cartão de crédito nas instituições conectadas.')}
           </section>
 
           <section class="card settings-section" id="set-seguranca">
@@ -160,6 +190,7 @@ export function mount(ctx: PageContext): () => void {
         </div>
       </div>`,
     );
+    if (focusKey) root.querySelector<HTMLElement>(focusKey)?.focus();
   };
 
   const openCredentials = () => {
@@ -307,7 +338,7 @@ export function mount(ctx: PageContext): () => void {
       notify('success', 'Layout restaurado');
     },
     'clear-cache': async () => {
-      const ok = await confirmDialog({ title: 'Limpar cache financeiro?', message: 'Os dados baixados da Pluggy serão apagados deste navegador (credenciais, Items registrados e categorização são mantidos).', confirmLabel: 'Limpar cache', danger: true });
+      const ok = await confirmDialog({ title: 'Limpar cache financeiro?', message: 'Os dados baixados da Pluggy serão apagados deste navegador (credenciais, Items registrados, categorização, lançamentos previstos e personalizações são mantidos).', confirmLabel: 'Limpar cache', danger: true });
       if (ok) await actions.clearFinancialCache();
     },
   });
@@ -319,6 +350,15 @@ export function mount(ctx: PageContext): () => void {
     estimates: (el) => void actions.updatePreferences({ includeEstimates: (el as HTMLInputElement).checked }),
     debug: (el) => void actions.updatePreferences({ debug: (el as HTMLInputElement).checked }),
     ttl: (el) => void actions.updatePreferences({ cacheTtlHours: Number((el as HTMLSelectElement).value) }),
+    'card-cycle': async (el) => {
+      const cardId = el.dataset.card!;
+      const read = (kind: string) => {
+        const v = root.querySelector<HTMLSelectElement>(`[data-change="card-cycle"][data-card="${CSS.escape(cardId)}"][data-kind="${kind}"]`)?.value;
+        return v ? Number(v) : null;
+      };
+      await actions.setCardCycle(cardId, { closingDay: read('closing'), dueDay: read('due') });
+      notify('success', 'Datas do cartão salvas', 'Fatura atual, previsão e saldo projetado foram recalculados.');
+    },
     import: async (el) => {
       const input = el as HTMLInputElement;
       const file = input.files?.[0];
@@ -343,6 +383,8 @@ export function mount(ctx: PageContext): () => void {
     if (s.connection !== prev.connection || s.preferences !== prev.preferences || s.itemIds !== prev.itemIds || s.sync !== prev.sync || s.dataVersion !== prev.dataVersion) paint();
   });
   paint();
+  const section = ctx.params.get('secao');
+  if (section) requestAnimationFrame(() => document.getElementById(`set-${section}`)?.scrollIntoView({ block: 'start' }));
   void refreshStorageInfo();
   return () => {
     off();

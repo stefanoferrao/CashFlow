@@ -4,14 +4,15 @@
 import { barChart, mountChart } from '../charts/charts';
 import { animateNumbers, delegate, html, render, type SafeHtml } from '../components/dom';
 import { icon } from '../components/icons';
-import { badge, figureValue, infoTip, meter, money, na, utilizationBadge } from '../components/ui';
-import type { NormalizedCard } from '../models/finance';
+import { badge, figureValue, infoTip, instLogo, meter, money, na, utilizationBadge } from '../components/ui';
+import type { NormalizedCard, NormalizedInstitution } from '../models/finance';
+import { readableTextOn } from '../services/institutions';
 import type { PageContext } from '../router';
 import { calculateFutureCardCharges, cardUtilization } from '../services/financialCalculator';
 import { store } from '../state/store';
 import { addDays, parseKey } from '../utils/dates';
 import { formatDate, formatMoney, formatMonthKey, formatPercent } from '../utils/format';
-import { analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, noDataState, onDataChange, tableToggle } from './shared';
+import { analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, institutionOf, noDataState, onDataChange, tableToggle } from './shared';
 
 function darken(hex: string, amount = 0.45): string {
   const h = hex.replace('#', '');
@@ -21,16 +22,18 @@ function darken(hex: string, amount = 0.45): string {
   return `#${[(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => f(c).toString(16).padStart(2, '0')).join('')}`;
 }
 
-export function creditCardVisual(c: NormalizedCard): SafeHtml {
+export function creditCardVisual(c: NormalizedCard, inst?: NormalizedInstitution | null): SafeHtml {
   const a = c.institutionColor && /^#[0-9a-f]{6}$/i.test(c.institutionColor) ? c.institutionColor : '#1f2937';
   const u = cardUtilization(c);
-  return html`<div class="cc" style="--cc-a:${a};--cc-b:${darken(a)}" role="img" aria-label="Cartão ${c.name} final ${c.lastFourDigits ?? 'não informado'}">
+  const brandLevel = [c.brand, c.level].filter(Boolean).join(' ');
+  const showName = c.name.trim().toLowerCase() !== brandLevel.toLowerCase();
+  return html`<div class="cc" style="--cc-a:${a};--cc-b:${darken(a)};--cc-fg:${readableTextOn(a)}" role="img" aria-label="Cartão ${c.name} de ${c.institution}, final ${c.lastFourDigits ?? 'não informado'}">
     <div class="cc__top">
-      <div class="stack-sm" style="gap:2px">
-        <span class="cc__brand">${[c.brand, c.level].filter(Boolean).join(' ') || 'Cartão de crédito'}</span>
-        <span class="cc__inst">${c.name}</span>
+      <div class="stack-sm" style="gap:2px;min-width:0">
+        <span class="cc__brand">${brandLevel || 'Cartão de crédito'}</span>
+        ${showName ? html`<span class="cc__inst">${c.name}</span>` : ''}
       </div>
-      <span class="cc__inst">${c.institution}</span>
+      <span class="cc__issuer">${inst ? instLogo(inst, 'xs') : ''}<span>${c.institution}</span></span>
     </div>
     <div class="cc__chip" aria-hidden="true"></div>
     <div class="cc__number sensitive">•••• •••• •••• ${c.lastFourDigits ?? '••••'}</div>
@@ -81,35 +84,46 @@ export function mount(ctx: PageContext): () => void {
             const next = summary ? calculateFutureCardCharges(summary, a.transactions, 1)[0] : undefined;
             const u = cardUtilization(card);
             const bestDay = summary ? parseKey(addDays(summary.cycle.closing, 1)).d : null;
+            const inst = institutionOf(card.itemId);
+            const cycleBadge = summary?.cycle.source === 'user' ? html` ${badge('definido por você', 'outline')}` : summary?.cycle.estimated ? html` ${badge('estimado', 'outline')}` : '';
+            const missingDates = !card.closingDate || !card.dueDate;
             return html`<article class="card">
               <div class="card-tile">
-                ${creditCardVisual(card)}
+                ${creditCardVisual(card, inst)}
                 <div class="stack">
                   <div class="row-between wrap">
-                    <div class="stack-sm" style="gap:2px">
-                      <strong style="font-size:18px">${card.name}</strong>
-                      <span class="muted" style="font-size:13px">${card.institution} · final ${card.lastFourDigits ?? '—'}${card.holderType === 'ADDITIONAL' ? ' · adicional' : ''}</span>
+                    <div class="row" style="gap:10px;min-width:0">
+                      ${inst ? instLogo(inst, 'md') : ''}
+                      <div class="stack-sm" style="gap:2px;min-width:0">
+                        <strong class="truncate" style="font-size:18px">${card.name}</strong>
+                        <span class="muted" style="font-size:13px">${card.institution}${inst?.via ? ` (via ${inst.via})` : ''} · final ${card.lastFourDigits ?? '—'}${card.holderType === 'ADDITIONAL' ? ' · adicional' : ''}</span>
+                      </div>
                     </div>
                     <div class="row wrap">${card.status && card.status !== 'ACTIVE' ? badge(card.status === 'BLOCKED' ? 'Bloqueado' : 'Cancelado', 'bad') : ''}${utilizationBadge(u)}</div>
                   </div>
-                  ${meter(u, `Utilização do limite do ${card.name}`, true)}
+                  ${meter(u, `Utilização do limite do ${card.label ?? card.name}`, true)}
                   <div class="detail-grid">
                     ${detail('Limite total', money(card.limit, { currency: card.currency }))}
                     ${detail('Limite disponível', money(card.availableLimit, { currency: card.currency }))}
                     ${detail('Limite utilizado', money(card.usedLimit, { currency: card.currency }), 'Limite total − disponível. Inclui parcelas futuras já comprometidas.')}
                     ${detail('Percentual utilizado', u !== null ? formatPercent(u) : 'Não informado')}
                     ${detail('Melhor dia de compra', bestDay ? `Dia ${bestDay}` : 'Não informado', 'Estimado como o dia seguinte ao fechamento da fatura aberta.')}
-                    ${detail('Fechamento', summary ? html`${formatDate(summary.cycle.closing)}${summary.cycle.estimated ? html` ${badge('estimado', 'outline')}` : ''}` : 'Não informado')}
-                    ${detail('Vencimento', summary ? formatDate(summary.cycle.due) : 'Não informado')}
+                    ${detail('Fechamento', summary ? html`${formatDate(summary.cycle.closing)}${cycleBadge}` : 'Não informado')}
+                    ${detail('Vencimento', summary ? html`${formatDate(summary.cycle.due)}${summary.cycle.source === 'user' && !card.dueDate ? html` ${badge('definido por você', 'outline')}` : ''}` : 'Não informado')}
                     ${detail('Fatura atual', summary ? money(summary.total, { currency: card.currency }) : 'Não disponível', 'Soma das compras e estornos do ciclo aberto, calculada a partir das transações.')}
                     ${detail('Previsão de fechamento', proj ? money(proj.paceForecast, { currency: card.currency }) : '—', 'Lançado + parcelas conhecidas + ritmo médio de gastos até o fechamento.')}
                     ${detail('Próxima fatura (parcelas já conhecidas)', next ? html`${money(next.total, { currency: card.currency })} <span class="muted" style="font-weight:500;font-size:12px">${formatMonthKey(next.month)}</span>` : 'Nenhuma parcela futura')}
                     ${card.minimumPayment !== null ? detail('Pagamento mínimo', money(card.minimumPayment, { currency: card.currency })) : ''}
                     ${detail('Saldo informado pela instituição', money(card.institutionBalance, { currency: card.currency }), 'Valor bruto "balance" da Pluggy. Em conectores Open Finance representa o limite utilizado; em outros, o saldo do mês.')}
                   </div>
+                  ${!summary
+                    ? html`<div class="callout callout--warn">${icon('calendar')}<div>A instituição não informa fechamento e vencimento deste cartão. <button type="button" class="link-btn" data-action="edit-card-cycle" data-value="${card.id}">Definir os dias</button> para calcular a fatura atual e a previsão.</div></div>`
+                    : ''}
                   <div class="row wrap">
                     <a class="btn btn--secondary btn--sm" href="#/faturas?card=${card.id}">${icon('receipt')}Ver fatura e previsão</a>
                     <a class="btn btn--ghost btn--sm" href="#/transacoes?card=${card.id}">${icon('list')}Transações do cartão</a>
+                    ${missingDates ? html`<button type="button" class="btn btn--ghost btn--sm" data-action="edit-card-cycle" data-value="${card.id}">${icon('calendar')}Fechamento e vencimento</button>` : ''}
+                    <button type="button" class="btn btn--ghost btn--sm" data-action="edit-identity" data-value="${card.itemId}" data-focus="${card.id}">${icon('pencil')}Personalizar</button>
                   </div>
                 </div>
               </div>
@@ -122,7 +136,7 @@ export function mount(ctx: PageContext): () => void {
                 ${chartFrame('card-util', Math.max(120, withLimits.length * 56), 'Percentual de limite utilizado por cartão', {
                   caption: 'Utilização por cartão',
                   headers: ['Cartão', 'Utilizado', 'Limite', '%'],
-                  rows: withLimits.map((x) => [x.name, money(x.usedLimit), money(x.limit), formatPercent(cardUtilization(x))]),
+                  rows: withLimits.map((x) => [x.label ?? x.name, money(x.usedLimit), money(x.limit), formatPercent(cardUtilization(x))]),
                 })}
               </section>`
             : ''}`}
@@ -134,7 +148,7 @@ export function mount(ctx: PageContext): () => void {
       void mountChart(
         canvas,
         barChart(
-          withLimits.map((x) => x.name),
+          withLimits.map((x) => x.label ?? x.name),
           [{ label: 'Utilizado', data: withLimits.map((x) => cardUtilization(x) ?? 0), colorIndex: 3 }],
           { horizontal: true, yFormat: 'percent' },
         ),

@@ -81,6 +81,11 @@ Ao concluir, o Item é salvo localmente e sincronizado.
 Se a sua aplicação tiver `GET /v2/items` habilitado (recurso opt-in da Pluggy), a opção **"Buscar automaticamente os Items da minha aplicação"**
 lista todos; se não tiver, o app explica e mantém o caminho manual.
 
+As conexões do Meu Pluggy chegam com o conector **"MeuPluggy"**, sem o nome do banco. O app identifica o banco pelos próprios dados
+(por exemplo, a conta "Nu Pagamentos S.A." indica Nubank) e usa o logo e a cor do catálogo oficial da Pluggy. Quando não dá para
+identificar, a conexão aparece como **"Banco não identificado"**: use **Contas → Personalizar** para dar nome, logo/ícone e cor
+(veja [Identidade das instituições](#identidade-das-instituições)).
+
 ### 3. No CashFlow
 
 *Configurações → Pluggy* (ou o onboarding) → informe Client ID, Client Secret e escolha como guardá-los:
@@ -123,6 +128,7 @@ Camadas:
 | Erros | `src/pluggy/errors.ts` | Classifica HTTP/rede em mensagens amigáveis; nunca mostra stack trace |
 | Sincronização | `src/pluggy/sync.ts` | Busca o pacote de um Item (Item, contas, transações, faturas, investimentos); falhas parciais viram avisos |
 | Normalização | `src/services/financialDataService.ts` | Converte payloads da Pluggy em modelos próprios; **único** lugar que interpreta sinais, tipos e categorias |
+| Identidade | `src/services/institutions.ts` | Nome, logo e cor de cada conexão; detecção do banco nas conexões do Meu Pluggy; apelidos e ciclos manuais de cartão. Só apresentação: não altera nenhum valor |
 | Cálculos | `src/services/financialCalculator.ts` | Todas as regras financeiras (funções puras); nenhuma página calcula nada por conta própria |
 | Analytics | `src/services/analytics.ts` | Resultado memoizado dos cálculos para a UI |
 | Cofre | `src/security/vault.ts`, `crypto.ts` | Chaves, cifragem e acesso às credenciais |
@@ -168,7 +174,7 @@ Banco IndexedDB `cashflow` (versão 1):
 | `credit_cards` | Cartões normalizados | **Sim** |
 | `bills` | Faturas fechadas | **Sim** |
 | `investments` | Investimentos | **Sim** |
-| `categories` | Árvore de categorias da Pluggy, suas regras/ajustes e lançamentos previstos | **Sim** |
+| `categories` | Árvore de categorias da Pluggy, suas regras/ajustes, lançamentos previstos, personalizações (nomes, cores, apelidos, dias de fechamento/vencimento) e o catálogo de conectores da Pluggy (7 dias) | **Sim** |
 | `snapshots` | Registros diários de patrimônio (histórico local) | **Sim** |
 | `dashboard_layout` | Posição/tamanho/visibilidade dos cards | Não (só layout) |
 | `user_preferences` | Preferências de exibição, cache, bloqueio | Não (sem dados sensíveis) |
@@ -247,9 +253,10 @@ Todos em `src/services/financialCalculator.ts` (funções puras, com testes):
 | `calculateCashFlow` | Entradas, saídas e saldo líquido por dia/semana/mês/ano |
 | `calculateAssetAllocation` | Contas + investimentos por classe; cada real aparece **uma** vez |
 
-**Ciclo da fatura:** usa `balanceCloseDate`/`balanceDueDate` da instituição quando válidos. O início é o dia seguinte ao fechamento
-da última fatura fechada; sem isso, fechamento − 1 mês (rotulado como estimado). Quando a transação traz `billForecastDate`
-(Open Finance), ele tem prioridade.
+**Ciclo da fatura:** a prioridade das datas é (1) `balanceCloseDate`/`balanceDueDate` informados pela instituição; (2) os dias de
+fechamento e vencimento que **você** definiu (Configurações → Cartões), usados só quando a instituição não informa; (3) a última
+fatura fechada + 1 mês (rotulado como estimado). Sem nenhum dos três, o app não inventa ciclo e pede os dias. O início do ciclo é o
+dia seguinte ao fechamento anterior. Quando a transação traz `billForecastDate` (Open Finance), ele tem prioridade.
 
 **Projeção de saldo** combina: lançamentos futuros informados pelo banco, faturas (aberta no vencimento, fechadas não pagas,
 parcelas futuras), **recorrências detectadas** no histórico (sempre rotuladas como estimativa e desligáveis em
@@ -268,15 +275,30 @@ após cada sincronização e (b) reconstrói o saldo bancário diário a partir 
   Cards: Patrimônio líquido, Saldo em contas, Investimentos por classe, Receitas × despesas, Para onde está indo meu dinheiro?,
   Fatura atual, Limites dos cartões, Receitas, Despesas, Próximos gastos, Saldo projetado e Insights.
 - **Contas** — saldos por instituição, histórico reconstruído, status de sincronização de cada Item, atualizar/reconectar/remover.
-- **Cartões** — limites, % usado, melhor dia de compra, fechamento, vencimento, fatura atual e próxima.
+- **Cartões** — limites, % usado, melhor dia de compra, fechamento, vencimento, fatura atual e próxima; dias de fechamento e vencimento definidos por você quando a instituição não informa.
 - **Faturas** — previsão (lançado + futuro), "Se você continuar gastando neste ritmo…", evolução diária, faturas futuras e fechadas.
 - **Transações** — busca instantânea (sem acento), filtros por período, conta, cartão, instituição, categoria, tipo e valor, ordenação e paginação; recategorização e regras.
 - **Investimentos** — por classe, instituição e produto; "Dados não disponíveis pela instituição" quando falta informação (nada é estimado).
 - **Fluxo de Caixa** — dia/semana/mês/ano, taxa de poupança, projeção 7–90 dias, lançamentos previstos.
 - **Análises** — indicadores e insights baseados apenas nos seus dados, cada um com a base de cálculo; sem recomendações de investimento.
-- **Configurações** — Conta, Pluggy, Segurança, Aparência, Dashboard, Dados locais e Sobre. Tela de **Privacidade e segurança**.
+- **Configurações** — Conta, Pluggy, Cartões, Segurança, Aparência, Dashboard, Dados locais e Sobre. Tela de **Privacidade e segurança**.
 - Tema Claro/Escuro/Sistema; ocultar valores; modo demonstração; menu inferior no mobile; responsivo de 320 a 1920 px.
 - Todo gráfico tem alternativa em tabela; cores validadas para daltonismo; nenhuma informação transmitida só por cor.
+
+### Identidade das instituições
+
+Cada conexão tem um **nome, um logo (ou ícone/iniciais) e uma cor** que aparecem em todo o app: Contas, Cartões (inclusive a cor do
+cartão), Faturas, Transações, Investimentos, Dashboard e Configurações.
+
+- **Automático:** conexões diretas usam o nome e o logo do conector. Nas conexões do **Meu Pluggy**, o banco é identificado pelos dados
+  (nome da conta, instituição custodiante e emissor dos investimentos) de forma conservadora: na dúvida, não identifica.
+  O logo e a cor vêm do catálogo oficial da Pluggy (`GET /connectors`, cache de 7 dias).
+- **Personalizar** (Contas, Cartões ou Configurações → Pluggy): nome exibido, busca do logo no catálogo, iniciais ou um ícone,
+  cor (12 opções ou qualquer cor), e **apelidos** para contas e cartões, por exemplo "Nubank · Conta salário".
+- Nomes de "razão social" ("Nu Pagamentos S.A. – Instituição de Pagamento") viram o tipo da conta ("Conta corrente"); o nome
+  original continua visível como "Na instituição: …". Cartões ou contas que a instituição nomeia com o **nome do titular** passam a
+  usar bandeira + nível (ex.: "Mastercard Gold"), e o nome do titular não é guardado.
+- Tudo fica **cifrado neste navegador**; "Voltar ao automático" desfaz a personalização.
 
 ---
 
@@ -292,6 +314,8 @@ após cada sincronização e (b) reconstrói o saldo bancário diário a partir 
 | Histórico de transações | A Pluggy fornece até ~12 meses | Busca 365 dias para trás e lançamentos futuros até 400 dias |
 | Listar Items automaticamente | `GET /v2/items` é opt-in | Guarda IDs do Connect e aceita IDs colados |
 | Items do Meu Pluggy | Não aceitam `PATCH /items/{id}` | Mensagem explicando que a atualização é feita pelo Meu Pluggy |
+| Banco de origem no Meu Pluggy | O conector "MeuPluggy" não informa de qual banco são os dados | Detecção pelos dados + personalização (nome, logo, cor) |
+| Fechamento/vencimento do cartão | Algumas instituições não informam | Você define os dias em Configurações → Cartões |
 | Categorias | Premium após o trial na Pluggy; podem vir nulas | Mapeamento por palavras-chave + ajustes do usuário |
 | Dados em outro dispositivo | Tudo é local | Cada navegador tem seu próprio cofre; exporte só a configuração visual |
 | Esqueceu a senha local | Não há recuperação (por desenho) | "Esqueci a senha local" apaga os dados locais para recomeçar |
@@ -353,18 +377,22 @@ npm test          # unitários
 npm run build && npm run test:e2e
 ```
 
-**Unitários (82):** todos os cálculos do `FinancialCalculator` (saldo, investimentos, patrimônio, dívida, utilização, ciclo de
+**Unitários (106):** todos os cálculos do `FinancialCalculator` (saldo, investimentos, patrimônio, dívida, utilização, ciclo de
 fatura, previsão no ritmo, saldo projetado, receitas/despesas, poupança, fluxo, alocação, histórico reconstruído), normalização
 (sinais de cartão, `kind`, parcelas, PII removida), Web Crypto (AES-GCM, AAD, senha errada, chave não extraível), cliente Pluggy
 (`/auth`, reuso e renovação do `apiKey`, cursor `next` sem recodificar, paginação, CORS × offline), formatação pt-BR, XSS,
-redação de logs, recorrências e consulta de transações.
+redação de logs, recorrências, consulta de transações e identidade das instituições (detecção do banco no Meu Pluggy, casos
+de corretora com vários emissores, nomes de razão social e do titular, catálogo de conectores, aplicação das personalizações,
+ciclo de fatura com dias definidos pelo usuário).
 
-**E2E (21, API da Pluggy simulada com os formatos oficiais):** tema claro/escuro/sistema e persistência; dashboard demo;
+**E2E (23, API da Pluggy simulada com os formatos oficiais):** tema claro/escuro/sistema e persistência; dashboard demo;
 personalização persistida e restaurar padrão; tabela alternativa dos gráficos; **sem overflow horizontal em
 320/375/390/414/768/1024/1280/1440/1920 px em todas as páginas**; menu "Mais" no mobile; fluxo de conexão completo (formato inválido,
 credencial recusada, sucesso, paginação por cursor, descrição maliciosa renderizada como texto); **nenhum segredo em texto puro**
 no IndexedDB, `localStorage`, URL ou DOM; bloqueio/desbloqueio usando o cache cifrado sem nova chamada à API; Item inexistente;
-detecção de CORS; "Apagar todos os dados locais".
+detecção de CORS; "Apagar todos os dados locais"; conexão do Meu Pluggy identificada como Nubank com logo do catálogo, nome do
+titular nunca exibido, dias de fechamento/vencimento definidos pelo usuário, personalização aplicada em cartões e transações,
+guardada cifrada e mantida após bloquear/desbloquear; renomear instituição e conta no modo demonstração.
 
 Nenhum teste usa credenciais reais.
 
@@ -375,15 +403,6 @@ Nenhum teste usa credenciais reais.
 `npm run build` gera `dist/` com caminhos relativos (`base: './'`): pode ser servido por qualquer host estático (GitHub Pages,
 Netlify, Cloudflare Pages, um servidor local). O build injeta a CSP como `<meta>`. Se o host permitir cabeçalhos HTTP,
 repita a mesma política no cabeçalho `Content-Security-Policy` e adicione `frame-ancestors 'none'` (que não funciona via `<meta>`).
-
-### GitHub Pages
-
-O workflow `.github/workflows/deploy-pages.yml` compila e publica o projeto automaticamente a cada push na branch `main`.
-No repositório do GitHub, abra **Settings > Pages** e, em **Build and deployment > Source**, selecione **GitHub Actions**.
-Depois, acompanhe a primeira publicação na aba **Actions**. O site ficará disponível em
-`https://<usuario>.github.io/<repositorio>/`.
-
-Não selecione **Deploy from a branch**: essa opção publicaria os arquivos-fonte do Vite sem executar o build.
 
 Não coloque credenciais em variáveis de ambiente, arquivos `.env`, GitHub Secrets ou no código: elas são informadas **somente**
 na interface, por quem usa o app, e ficam no navegador dessa pessoa.

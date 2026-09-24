@@ -32,6 +32,7 @@ import {
   monthStart,
   weekStart,
   addMonthsToMonthKey,
+  nextDayOfMonth,
 } from '../utils/dates';
 import type { Recurrence } from './recurrence';
 import { projectRecurrence } from './recurrence';
@@ -386,24 +387,37 @@ export interface CardCycle {
   due: DateKey;
   /** true quando datas foram inferidas (instituição não informou ou ciclo informado já fechou). */
   estimated: boolean;
+  /** Origem das datas: instituição, dias definidos pelo usuário ou histórico de faturas. */
+  source: 'institution' | 'user' | 'history';
 }
 
 /**
- * Ciclo da fatura aberta. Usa balanceCloseDate/balanceDueDate da instituição quando válidos;
- * o início é o dia seguinte ao fechamento da última fatura fechada (ou fechamento − 1 mês).
+ * Ciclo da fatura aberta. Prioridade das datas:
+ *  1. balanceCloseDate/balanceDueDate informados pela instituição;
+ *  2. dias de fechamento/vencimento definidos pelo usuário (quando a instituição não informa);
+ *  3. última fatura fechada + 1 mês (estimado).
+ * O início é o dia seguinte ao fechamento da última fatura fechada (ou fechamento − 1 mês).
  */
 export function getCardCycle(card: NormalizedCard, bills: NormalizedBill[], today: DateKey): CardCycle | null {
   let closing = card.closingDate;
   let due = card.dueDate;
   let estimated = false;
+  let source: CardCycle['source'] = 'institution';
+  const manualClosing = card.manualClosingDay ?? null;
+  const manualDue = card.manualDueDay ?? null;
   const cardBills = bills.filter((b) => b.cardId === card.id).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
+  if (!closing && manualClosing) {
+    closing = nextDayOfMonth(today, manualClosing);
+    source = 'user';
+  }
   if (!closing) {
     const lastClosed = [...cardBills].reverse().find((b) => b.closingDate);
     if (!lastClosed?.closingDate) return null;
     closing = addMonths(lastClosed.closingDate, 1);
     due = addMonths(lastClosed.dueDate, 1);
     estimated = true;
+    source = 'history';
   }
   // Ciclo informado já fechou (dados antigos) → projeta o próximo.
   let guard = 0;
@@ -412,15 +426,19 @@ export function getCardCycle(card: NormalizedCard, bills: NormalizedBill[], toda
     if (due) due = addMonths(due, 1);
     estimated = true;
   }
-  if (!due) {
-    due = addDays(closing, 7);
-    estimated = true;
+  if (!due || (source === 'user' && manualDue)) {
+    if (manualDue) {
+      due = nextDayOfMonth(addDays(closing, 1), manualDue);
+    } else {
+      due = addDays(closing, 7);
+      estimated = true;
+    }
   }
   const previousClosed = [...cardBills].reverse().find((b) => b.closingDate && b.closingDate < closing!);
   const start = previousClosed?.closingDate && diffDays(previousClosed.closingDate, closing) <= 40 && diffDays(previousClosed.closingDate, closing) >= 20
     ? addDays(previousClosed.closingDate, 1)
     : addDays(addMonths(closing, -1), 1);
-  return { cardId: card.id, start, closing, due, estimated };
+  return { cardId: card.id, start, closing, due, estimated, source };
 }
 
 export interface CardBillSummary {
@@ -591,11 +609,11 @@ export function buildProjectionEvents(input: {
   for (const s of input.billSummaries) {
     if (s.card.currency !== base) continue;
     if (s.cycle.due > today && s.cycle.due <= end && s.total > 0) {
-      events.push({ date: s.cycle.due, amount: -s.total, label: `Fatura ${s.card.name}`, kind: 'bill', certainty: s.cycle.estimated ? 'estimated' : 'confirmed', origin: 'bill' });
+      events.push({ date: s.cycle.due, amount: -s.total, label: `Fatura ${s.card.label ?? s.card.name}`, kind: 'bill', certainty: s.cycle.estimated ? 'estimated' : 'confirmed', origin: 'bill' });
     }
     for (const f of calculateFutureCardCharges(s, input.transactions, 4)) {
       if (f.due > today && f.due <= end) {
-        events.push({ date: f.due, amount: -f.total, label: `Parcelas futuras ${s.card.name}`, kind: 'bill', certainty: 'confirmed', origin: 'bill' });
+        events.push({ date: f.due, amount: -f.total, label: `Parcelas futuras ${s.card.label ?? s.card.name}`, kind: 'bill', certainty: 'confirmed', origin: 'bill' });
       }
     }
   }

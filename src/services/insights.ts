@@ -100,8 +100,8 @@ export function generateInsights(a: Input, ds: FinancialDataset): Insight[] {
       id: 'bill-due-soon',
       tone: 'attention',
       icon: 'calendar',
-      text: `A fatura do ${soon.card.name} vence ${days === 0 ? 'hoje' : `em ${days} ${days === 1 ? 'dia' : 'dias'}`} (${formatDate(soon.cycle.due)}), com ${formatMoney(soon.total)} lançados até agora.`,
-      basis: soon.cycle.estimated ? 'Datas estimadas a partir do último ciclo' : 'Datas informadas pela instituição',
+      text: `A fatura do ${soon.card.label ?? soon.card.name} vence ${days === 0 ? 'hoje' : `em ${days} ${days === 1 ? 'dia' : 'dias'}`} (${formatDate(soon.cycle.due)}), com ${formatMoney(soon.total)} lançados até agora.`,
+      basis: soon.cycle.source === 'user' ? 'Dias de fechamento e vencimento definidos por você' : soon.cycle.estimated ? 'Datas estimadas a partir do último ciclo' : 'Datas informadas pela instituição',
     });
   }
 

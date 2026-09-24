@@ -92,6 +92,15 @@ export async function startApp(): Promise<void> {
     if (shell) void mountRoute();
   });
   window.addEventListener('resize', debounce(() => resizeCharts(), 150));
+  // Logo de instituição que não carregou (offline, bloqueado): mostra as iniciais. Sem handler inline (CSP).
+  document.addEventListener(
+    'error',
+    (e) => {
+      const img = e.target;
+      if (img instanceof HTMLImageElement) img.closest('.inst-logo')?.classList.add('is-broken');
+    },
+    true,
+  );
   window.addEventListener('unhandledrejection', (e) => {
     // Nunca mostrar stack trace: mensagem genérica e amigável.
     e.preventDefault();

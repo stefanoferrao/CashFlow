@@ -5,14 +5,20 @@
  */
 import { APP_CONFIG } from '../config/app.config';
 import {
+  type CardCycleSetting,
   type CategoryOverride,
   type CategoryRule,
   type AppCategoryId,
+  type ConnectorInfo,
+  type InstitutionIdentity,
   type NetWorthSnapshot,
   type PlannedEntry,
   type UserCategorization,
+  type UserLabels,
   emptyCategorization,
   emptyDataset,
+  emptyLabels,
+  normalizeLabels,
 } from '../models/finance';
 import { PluggyClient } from '../pluggy/client';
 import { openPluggyConnect } from '../pluggy/connect';
@@ -25,6 +31,7 @@ import { isWebCryptoAvailable } from '../security/crypto';
 import { CategoryResolver } from '../services/categories';
 import { buildDemoDataset } from '../services/demoData';
 import { createSnapshot, calculateNetWorth, upsertSnapshot } from '../services/financialCalculator';
+import { applyIdentities, isHexColor, toHexColor, validDay } from '../services/institutions';
 import { type NormalizedItemData, mergeItemData, normalizeBundle, normalizeItem } from '../services/financialDataService';
 import { deleteDatabase, isPersistent } from '../storage/db';
 import {
@@ -40,7 +47,7 @@ import { secureRepo } from '../storage/repository';
 import { uid } from '../utils/async';
 import { todayKey } from '../utils/dates';
 import { notify } from './notify';
-import { store } from './store';
+import { type AppState, store } from './store';
 
 // ------------------------------------------------------------------ cliente Pluggy
 
@@ -62,6 +69,18 @@ function getClient(): PluggyClient {
 function resetClient(): void {
   client?.clearSession();
   client = null;
+}
+
+/**
+ * Publica dados no estado: guarda o dataset original e o dataset APRESENTADO
+ * (identidades das instituições, apelidos e ciclos manuais aplicados — services/institutions.ts).
+ */
+function setData(patch: Partial<AppState> = {}): void {
+  const s = store.state;
+  const baseDataset = patch.baseDataset ?? s.baseDataset;
+  const labels = patch.labels ?? s.labels;
+  const connectors = patch.connectors ?? s.connectors;
+  store.set({ ...patch, baseDataset, labels, connectors, dataset: applyIdentities(baseDataset, labels, connectors) });
 }
 
 // ------------------------------------------------------------------ inicialização
@@ -127,9 +146,11 @@ export async function reloadPreferences(): Promise<void> {
 // ------------------------------------------------------------------ modo demonstração
 
 export function startDemo(persist = true): void {
-  store.set({
+  setData({
     mode: 'demo',
-    dataset: buildDemoDataset(),
+    baseDataset: buildDemoDataset(),
+    labels: emptyLabels(),
+    connectors: [],
     categorization: emptyCategorization(),
     planned: [],
     itemIds: [],
@@ -307,15 +328,19 @@ async function readItemParts(): Promise<{ ids: string[]; parts: NormalizedItemDa
 
 /** Carrega o cache cifrado. Retorna true se estiver vazio ou desatualizado (deve sincronizar). */
 export async function loadCache(): Promise<boolean> {
-  const [{ ids, parts, oldest }, snaps, uc, planned] = await Promise.all([
+  const [{ ids, parts, oldest }, snaps, uc, planned, labels, connectors] = await Promise.all([
     readItemParts(),
     secureRepo.get<NetWorthSnapshot[]>('snapshots', 'netWorth'),
     secureRepo.get<UserCategorization>('categories', 'user'),
     secureRepo.get<PlannedEntry[]>('categories', 'planned'),
+    secureRepo.get<UserLabels>('categories', 'labels'),
+    secureRepo.get<ConnectorInfo[]>('categories', 'connectors'),
   ]);
   const dataset = parts.length ? mergeItemData(parts, snaps?.value ?? []) : { ...emptyDataset('pluggy'), snapshots: snaps?.value ?? [] };
-  store.set({
-    dataset,
+  setData({
+    baseDataset: dataset,
+    labels: normalizeLabels(labels?.value),
+    connectors: connectors?.value ?? [],
     itemIds: ids,
     categorization: uc?.value ?? emptyCategorization(),
     planned: planned?.value ?? [],
@@ -366,7 +391,7 @@ export function syncAll(opts: { onlyItemId?: string } = {}): Promise<void> {
     setSync({ status: 'syncing', progress: 'Atualizando dados de demonstração' });
     return new Promise((r) =>
       setTimeout(() => {
-        store.set({ dataset: buildDemoDataset() });
+        setData({ baseDataset: buildDemoDataset() });
         setSync({ status: 'idle', progress: null, lastSyncAt: new Date().toISOString() });
         r();
       }, 700),
@@ -439,7 +464,8 @@ async function runSync(onlyItemId?: string): Promise<void> {
     const nw = calculateNetWorth(ds.accounts, ds.investments, ds.cards);
     const snaps = upsertSnapshot(ds.snapshots, createSnapshot(todayKey(), nw));
     await secureRepo.put('snapshots', 'netWorth', snaps);
-    store.set({ dataset: { ...store.state.dataset, snapshots: snaps } });
+    setData({ baseDataset: { ...store.state.baseDataset, snapshots: snaps } });
+    void ensureConnectors();
   }
 
   if (failures.length === ids.length) {
@@ -562,6 +588,17 @@ export async function removeItemLocally(itemId: string): Promise<void> {
     secureRepo.delete('transactions', itemId),
     secureRepo.delete('investments', itemId),
   ]);
+  // Personalizações da conexão (nome, aparência, apelidos e ciclos dos cartões dela) também saem.
+  const ds = store.state.baseDataset;
+  const ownIds = new Set([...ds.accounts, ...ds.cards].filter((x) => x.itemId === itemId).map((x) => x.id));
+  const cur = store.state.labels;
+  if (cur.identities[itemId] || [...ownIds].some((id) => cur.nicknames[id] || cur.cardCycles[id])) {
+    const identities = { ...cur.identities };
+    delete identities[itemId];
+    const nicknames = Object.fromEntries(Object.entries(cur.nicknames).filter(([id]) => !ownIds.has(id)));
+    const cardCycles = Object.fromEntries(Object.entries(cur.cardCycles).filter(([id]) => !ownIds.has(id)));
+    await secureRepo.put('categories', 'labels', { identities, nicknames, cardCycles } satisfies UserLabels);
+  }
   await loadCache();
   notify('success', 'Instituição removida deste navegador', 'Para revogar o acesso de fato, remova o item no Dashboard da Pluggy ou no Meu Pluggy.');
 }
@@ -569,10 +606,99 @@ export async function removeItemLocally(itemId: string): Promise<void> {
 /** Limpa somente o cache financeiro (mantém credenciais e Items registrados). */
 export async function clearFinancialCache(): Promise<void> {
   const ids = [...store.state.itemIds];
+  // Preserva o que é do usuário (categorização, previstos e personalizações) — só os dados financeiros saem.
+  const keep = await Promise.all((['user', 'planned', 'labels'] as const).map(async (k) => [k, await secureRepo.get<unknown>('categories', k)] as const));
   await secureRepo.clearAll();
+  for (const [k, rec] of keep) if (rec) await secureRepo.put('categories', k, rec.value);
   for (const id of ids) await secureRepo.put('pluggy_items', id, { itemId: id, addedAt: new Date().toISOString(), data: null } satisfies ItemRecord);
   await loadCache();
   notify('success', 'Cache local apagado', 'Os Items continuam registrados; use "Atualizar agora" para baixar os dados novamente.');
+}
+
+// ------------------------------------------------------------------ identidade das instituições
+
+const CONNECTORS_TTL_MS = 7 * 24 * 3600_000;
+
+/**
+ * Catálogo de conectores da Pluggy (GET /connectors) — dá logo e cor oficiais às instituições,
+ * inclusive às detectadas em conexões do Meu Pluggy. Cache cifrado de 7 dias; falhas são silenciosas.
+ */
+export async function ensureConnectors(force = false): Promise<void> {
+  if (store.state.mode !== 'real' || !vault.isUnlocked() || !store.state.connection.hasCredentials) return;
+  const cached = await secureRepo.get<ConnectorInfo[]>('categories', 'connectors');
+  if (!force && cached && !cached.expired && cached.value.length) {
+    if (!store.state.connectors.length) setData({ connectors: cached.value });
+    return;
+  }
+  if (!store.state.online) return;
+  try {
+    const list = await getClient().getConnectors();
+    const info: ConnectorInfo[] = list
+      .filter((c) => typeof c.id === 'number' && typeof c.name === 'string')
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        imageUrl: typeof c.imageUrl === 'string' && /^https:\/\//.test(c.imageUrl) ? c.imageUrl : null,
+        primaryColor: toHexColor(c.primaryColor ?? null),
+        type: c.type ?? null,
+        isOpenFinance: !!c.isOpenFinance,
+      }));
+    await secureRepo.put('categories', 'connectors', info, CONNECTORS_TTL_MS);
+    setData({ connectors: info });
+  } catch (e) {
+    debugLog('connectors', 'catálogo indisponível', toPluggyError(e).kind);
+  }
+}
+
+async function saveLabels(labels: UserLabels): Promise<void> {
+  setData({ labels });
+  if (store.state.mode === 'real') await secureRepo.put('categories', 'labels', labels);
+}
+
+function cleanIdentity(i: InstitutionIdentity): InstitutionIdentity | null {
+  const name = i.name.trim().slice(0, 40);
+  if (!name) return null;
+  const imageUrl = i.imageUrl && /^https:\/\//.test(i.imageUrl) ? i.imageUrl : null;
+  return {
+    name,
+    color: isHexColor(i.color) ? i.color.toUpperCase() : '#64748B',
+    logo: i.logo === 'image' && !imageUrl ? 'initials' : i.logo,
+    icon: i.logo === 'icon' ? i.icon : null,
+    connectorId: imageUrl ? i.connectorId : null,
+    imageUrl,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Salva a personalização de uma conexão: identidade (null = voltar ao automático)
+ * e apelidos das contas/cartões dela (string vazia = remover apelido).
+ */
+export async function saveInstitutionCustomization(itemId: string, identity: InstitutionIdentity | null, nicknames: Record<string, string>): Promise<void> {
+  const cur = store.state.labels;
+  const identities = { ...cur.identities };
+  const clean = identity ? cleanIdentity(identity) : null;
+  if (clean) identities[itemId] = clean;
+  else delete identities[itemId];
+  const nick = { ...cur.nicknames };
+  for (const [id, value] of Object.entries(nicknames)) {
+    const v = value.trim().slice(0, 40);
+    if (v) nick[id] = v;
+    else delete nick[id];
+  }
+  await saveLabels({ ...cur, identities, nicknames: nick });
+  notify('success', 'Personalização salva', 'O novo nome e a aparência já valem em todo o app.');
+}
+
+/** Dias de fechamento/vencimento de um cartão (null = usar só o que a instituição informa). */
+export async function setCardCycle(cardId: string, cycle: CardCycleSetting | null): Promise<void> {
+  const cur = store.state.labels;
+  const cardCycles = { ...cur.cardCycles };
+  const closingDay = validDay(cycle?.closingDay);
+  const dueDay = validDay(cycle?.dueDay);
+  if (closingDay || dueDay) cardCycles[cardId] = { closingDay, dueDay };
+  else delete cardCycles[cardId];
+  await saveLabels({ ...cur, cardCycles });
 }
 
 // ------------------------------------------------------------------ categorização e previstos

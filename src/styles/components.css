@@ -154,6 +154,9 @@
   color: var(--text-2);
   min-width: 0;
 }
+.kv:has(.inst-name) {
+  align-items: center;
+}
 .kv > strong {
   font-weight: 600;
   text-align: right;
@@ -293,6 +296,21 @@
 .icon-btn--sm svg {
   width: 16px;
   height: 16px;
+}
+.icon-btn--xs {
+  width: 28px;
+  height: 28px;
+  color: var(--text-3);
+}
+.icon-btn--xs svg {
+  width: 15px;
+  height: 15px;
+}
+/* Área de toque maior que o ícone (≥ 40px). */
+.icon-btn--xs::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
 }
 .icon-btn.is-spinning svg {
   animation: spin 0.9s linear infinite;
@@ -789,23 +807,69 @@ button.list-item:hover {
   height: 18px;
 }
 .inst-logo {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--r-md);
+  --logo: 36px;
+  position: relative;
+  width: var(--logo);
+  height: var(--logo);
+  border-radius: calc(var(--logo) * 0.28);
   background: var(--surface-2);
   display: grid;
   place-items: center;
   overflow: hidden;
   flex: none;
   font-weight: 700;
-  font-size: var(--fs-sm);
+  font-size: calc(var(--logo) * 0.38);
+  letter-spacing: 0.02em;
+  line-height: 1;
   color: var(--text-2);
+}
+.inst-logo--lg { --logo: 48px; }
+.inst-logo--sm { --logo: 24px; }
+.inst-logo--xs { --logo: 18px; border-radius: 5px; }
+.inst-logo .ic {
+  width: 56%;
+  height: 56%;
+}
+.inst-logo--img {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 .inst-logo img {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  padding: 4px;
+  padding: 12%;
+}
+.inst-logo__fallback {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+}
+.inst-logo.is-broken img {
+  display: none;
+}
+.inst-logo.is-broken .inst-logo__fallback {
+  display: grid;
+}
+.inst-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.inst-name__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inst-name__via {
+  color: var(--text-3);
+  font-weight: 500;
+  font-size: 0.9em;
 }
 
 /* ===================== Estados ===================== */
@@ -1245,7 +1309,7 @@ button.list-item:hover {
   max-width: 420px;
   border-radius: 18px;
   padding: clamp(16px, 5%, 24px);
-  color: #f9fafb;
+  color: var(--cc-fg, #f9fafb);
   background:
     radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--cc-a) 70%, #ffffff 18%) 0%, transparent 55%),
     linear-gradient(140deg, var(--cc-a) 0%, var(--cc-b) 100%);
@@ -1285,6 +1349,24 @@ button.list-item:hover {
   font-size: clamp(11px, 3vw, 12px);
   opacity: 0.75;
   text-align: right;
+}
+.cc__issuer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 55%;
+  font-size: clamp(11px, 3vw, 12px);
+  font-weight: 600;
+}
+.cc__issuer > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+.cc__issuer .inst-logo {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 .cc__chip {
   width: 38px;

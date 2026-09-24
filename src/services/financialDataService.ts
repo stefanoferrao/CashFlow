@@ -68,6 +68,32 @@ export function normalizeItem(item: PluggyItem): NormalizedItem {
   };
 }
 
+/** Algumas instituições usam o nome do titular como nome da conta/cartão: não guardamos o nome do titular. */
+export function isHolderName(name: string, owner: string | null | undefined): boolean {
+  if (!owner) return false;
+  const words = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]+/g, ' ').trim().split(' ').filter(Boolean);
+  const a = words(name);
+  const b = words(owner);
+  if (!a.length || !b.length) return false;
+  if (a.join(' ') === b.join(' ')) return true;
+  // Nome abreviado do titular ("STEFANO L FERRAO" para "Stefano Luiz Ferrao"): mesmo primeiro e último nome,
+  // e cada palavra do meio é um nome do titular ou a inicial dele, na ordem.
+  if (a.length < 2 || a[0] !== b[0] || a[a.length - 1] !== b[b.length - 1]) return false;
+  let j = 1;
+  for (let i = 1; i < a.length - 1; i++) {
+    const w = a[i]!;
+    while (j < b.length - 1 && !(b[j] === w || (w.length === 1 && b[j]![0] === w))) j++;
+    if (j >= b.length - 1) return false;
+    j++;
+  }
+  return true;
+}
+
+function accountName(acc: PluggyAccount, fallback: string): string {
+  const name = acc.marketingName || acc.name || fallback;
+  return isHolderName(name, acc.owner) ? fallback : name;
+}
+
 export function normalizeAccount(acc: PluggyAccount, institution: string, updatedAt: string | null): NormalizedAccount {
   const bd = acc.bankData;
   const reserved = bd?.reservedBalances?.reduce((s, r) => s + r.availableAmounts.reduce((a, x) => a + (x.amount ?? 0), 0), 0) ?? null;
@@ -75,7 +101,7 @@ export function normalizeAccount(acc: PluggyAccount, institution: string, update
     id: acc.id,
     itemId: acc.itemId,
     institution,
-    name: acc.marketingName || acc.name || 'Conta',
+    name: accountName(acc, acc.subtype === 'CHECKING_ACCOUNT' ? 'Conta corrente' : acc.subtype === 'SAVINGS_ACCOUNT' ? 'Poupança' : 'Conta'),
     type: acc.subtype === 'CHECKING_ACCOUNT' ? 'checking' : acc.subtype === 'SAVINGS_ACCOUNT' ? 'savings' : 'other',
     lastDigits: lastDigits(acc.number),
     balance: round2(acc.balance ?? 0),
@@ -98,7 +124,7 @@ export function normalizeCard(acc: PluggyAccount, institution: string, color: st
     itemId: acc.itemId,
     institution,
     institutionColor: color,
-    name: acc.marketingName || acc.name || 'Cartão',
+    name: accountName(acc, [cd?.brand, cd?.level].filter(Boolean).join(' ').toLowerCase().replace(/(^|\s)\S/g, (m) => m.toUpperCase()) || 'Cartão de crédito'),
     brand: cd?.brand ?? null,
     level: cd?.level ?? null,
     lastFourDigits: lastDigits(acc.number),

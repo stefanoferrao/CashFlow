@@ -19,6 +19,7 @@ como apagá-las — e, com a mesma franqueza, **o que ela não consegue proteger
 | Senha local | **Em lugar nenhum** | Só é usada para derivar a chave; nunca é gravada |
 | `apiKey` da Pluggy (JWT de 2 h) | **Somente memória** (variável do cliente) | Nunca é gravado |
 | Dados financeiros (contas, transações, cartões, faturas, investimentos, categorias, histórico) | IndexedDB, um store por tipo | **Cifrados** com a mesma DEK |
+| Personalizações (nomes e cores das instituições, apelidos, dias de fechamento/vencimento) | IndexedDB, store `categories` | **Cifradas** com a mesma DEK |
 | Layout do dashboard e preferências de exibição | IndexedDB (`dashboard_layout`, `user_preferences`) | Texto puro — não contêm dados financeiros nem credenciais |
 | Tema (claro/escuro/sistema) | `localStorage` (`cashflow.theme`) | Texto puro — só o nome do tema |
 
@@ -71,7 +72,8 @@ senha local ──PBKDF2-SHA256 (salt aleatório de 16 bytes, 600.000 iteraçõe
 - **Logs:** desligados por padrão. O "modo de depuração" passa tudo por um redator que remove Secret, `apiKey`/JWT, `X-API-KEY`,
   CPF, CNPJ e identificadores.
 - **Erros:** o usuário vê mensagens amigáveis; stack traces e corpos de resposta não são exibidos.
-- **Dados pessoais:** nome e CPF/CNPJ do titular e os dados de pagador/recebedor que a Pluggy retorna não são guardados; da parte de pagamento, só o meio (ex.: PIX) é mantido.
+- **Dados pessoais:** nome e CPF/CNPJ do titular e os dados de pagador/recebedor que a Pluggy retorna não são guardados; da parte de pagamento, só o meio (ex.: PIX) é mantido. Quando a instituição usa o nome do titular como nome da conta ou do cartão (inclusive abreviado), ele é trocado por um nome genérico ("Conta corrente", "Mastercard Gold") na normalização.
+- **Logos das instituições:** vêm do catálogo oficial da Pluggy (`GET /connectors`) e são carregados de `cdn.pluggy.ai` com `referrerpolicy="no-referrer"`. A Pluggy consegue ver quais logos o navegador carrega — ela já sabe quais instituições você conectou. Se preferir não carregar imagens, escolha iniciais ou um ícone em **Personalizar**.
 
 ---
 
@@ -80,7 +82,8 @@ senha local ──PBKDF2-SHA256 (salt aleatório de 16 bytes, 600.000 iteraçõe
 | Ação | Onde | O que remove |
 |---|---|---|
 | **Remover credenciais** (com confirmação) | Configurações → Segurança | Client ID/Secret e o `apiKey` em memória. O cache financeiro cifrado continua, até você apagá-lo |
-| **Remover deste navegador** (instituição) | Contas → menu da instituição, ou Configurações → Pluggy | O Item e os dados dele **neste navegador** (não apaga nada na Pluggy) |
+| **Remover deste navegador** (instituição) | Contas → menu da instituição, ou Configurações → Pluggy | O Item, os dados dele e as personalizações dele **neste navegador** (não apaga nada na Pluggy) |
+| **Limpar cache financeiro** | Configurações → Dados locais | Só os dados baixados da Pluggy; categorização, lançamentos previstos e personalizações são mantidos |
 | **Apagar todos os dados locais** | Configurações → Segurança (confirmação digitando `APAGAR`) | O banco IndexedDB inteiro, o tema no `localStorage` e o `sessionStorage`; descarta chaves da memória e volta ao início |
 | **Esqueci a senha local** | Tela de desbloqueio | O mesmo que "Apagar todos os dados locais" (sem a senha não há como decifrar nada) |
 | **Bloquear agora** | Menu do usuário ou Configurações | Nada é apagado; tudo que estava decifrado sai da memória |

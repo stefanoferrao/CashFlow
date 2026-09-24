@@ -18,6 +18,7 @@ import type {
   PluggyApiError,
   PluggyBill,
   PluggyCategory,
+  PluggyConnector,
   PluggyInvestment,
   PluggyItem,
   PluggyTransaction,
@@ -270,6 +271,11 @@ export class PluggyClient {
 
   async getCategories(): Promise<PluggyCategory[]> {
     return this.getAllPages<PluggyCategory>('/categories');
+  }
+
+  /** GET /connectors?countries=BR — catálogo de instituições (nome, logo e cor oficiais da Pluggy). */
+  async getConnectors(): Promise<PluggyConnector[]> {
+    return this.getAllPages<PluggyConnector>('/connectors?countries=BR');
   }
 
   /** POST /connect_token — token de 30 min para o widget Pluggy Connect. */

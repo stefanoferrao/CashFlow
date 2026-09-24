@@ -186,6 +186,18 @@ export interface PluggyCategory {
   parentDescription?: string;
 }
 
+/** Conector (GET /connectors) — somente os campos usados (tipo `Connector` do SDK oficial). */
+export interface PluggyConnector {
+  id: number;
+  name: string;
+  institutionUrl?: string;
+  imageUrl?: string;
+  primaryColor?: string;
+  type?: string;
+  country?: string;
+  isOpenFinance?: boolean;
+}
+
 /** Dados brutos coletados de um Item numa sincronização (existem só em memória, durante a normalização). */
 export interface RawItemBundle {
   item: PluggyItem;

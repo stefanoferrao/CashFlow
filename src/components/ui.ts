@@ -1,7 +1,8 @@
 /**
  * Peças visuais reutilizáveis (sem lógica financeira).
  */
-import { type AppCategoryId, CATEGORY_BY_ID } from '../models/finance';
+import { type AppCategoryId, CATEGORY_BY_ID, type NormalizedInstitution } from '../models/finance';
+import { initialsOf, isHexColor, readableTextOn } from '../services/institutions';
 import { formatMoney, formatPercent, formatSignedMoney } from '../utils/format';
 import { html, type SafeHtml } from './dom';
 import { icon } from './icons';
@@ -110,18 +111,33 @@ export function categoryLabel(id: AppCategoryId): string {
   return CATEGORY_BY_ID[id]?.label ?? 'Outros';
 }
 
-export function instLogo(inst: { name: string; imageUrl: string | null; primaryColor: string | null }): SafeHtml {
-  const initials = inst.name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]!.toUpperCase())
-    .join('');
-  if (inst.imageUrl) {
-    return html`<span class="inst-logo"><img src="${inst.imageUrl}" alt="" loading="lazy" referrerpolicy="no-referrer" /></span>`;
+export type InstLike = Pick<NormalizedInstitution, 'name' | 'imageUrl' | 'primaryColor'> &
+  Partial<Pick<NormalizedInstitution, 'logo' | 'icon' | 'initials' | 'textColor'>>;
+
+/**
+ * Identidade visual da instituição: logo da Pluggy, ícone ou iniciais sobre a cor escolhida.
+ * Decorativo (o nome sempre acompanha). Se o logo não carregar, as iniciais aparecem (ver app.ts).
+ */
+export function instLogo(inst: InstLike, size: 'lg' | 'md' | 'sm' | 'xs' = 'md'): SafeHtml {
+  const color = isHexColor(inst.primaryColor) ? inst.primaryColor : null;
+  const fg = inst.textColor ?? (color ? readableTextOn(color) : null);
+  const initials = inst.initials ?? initialsOf(inst.name);
+  const cls = `inst-logo inst-logo--${size}`;
+  if (inst.imageUrl && inst.logo !== 'initials' && inst.logo !== 'icon') {
+    return html`<span class="${cls} inst-logo--img" aria-hidden="true">
+      <img src="${inst.imageUrl}" alt="" loading="lazy" referrerpolicy="no-referrer" />
+      <span class="inst-logo__fallback" style="${color ? `background:${color};color:${fg}` : ''}">${initials}</span>
+    </span>`;
   }
-  const color = inst.primaryColor ?? 'var(--text-2)';
-  return html`<span class="inst-logo" style="color:${color}" aria-hidden="true">${initials}</span>`;
+  const content = inst.logo === 'icon' && inst.icon ? icon(inst.icon) : initials;
+  return html`<span class="${cls}" style="${color ? `background:${color};color:${fg}` : ''}" aria-hidden="true">${content}</span>`;
+}
+
+/** Logo + nome da instituição (e "via Meu Pluggy" quando for o caso). */
+export function instName(inst: InstLike & { via?: string | null }, opts: { size?: 'md' | 'sm' | 'xs'; via?: boolean } = {}): SafeHtml {
+  return html`<span class="inst-name">${instLogo(inst, opts.size ?? 'xs')}<span class="inst-name__text">${inst.name}${
+    opts.via && inst.via ? html` <span class="inst-name__via">via ${inst.via}</span>` : ''
+  }</span></span>`;
 }
 
 export function kv(label: string | SafeHtml, value: SafeHtml | string): SafeHtml {
@@ -138,7 +154,7 @@ export function pageHead(title: string, intro: string | null, actions?: SafeHtml
   </div>`;
 }
 
-export function segmented(name: string, options: Array<{ value: string; label: string }>, current: string, label: string): SafeHtml {
+export function segmented(name: string, options: Array<{ value: string; label: string | SafeHtml }>, current: string, label: string): SafeHtml {
   return html`<div class="segmented" role="group" aria-label="${label}">
     ${options.map((o) => html`<button type="button" data-action="${name}" data-value="${o.value}" aria-pressed="${o.value === current ? 'true' : 'false'}">${o.label}</button>`)}
   </div>`;

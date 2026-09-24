@@ -17,6 +17,76 @@ export interface NormalizedInstitution {
   primaryColor: string | null;
   isOpenFinance: boolean;
   isSandbox: boolean;
+  // ---- Apresentação (preenchida pela camada de identidade — services/institutions.ts) ----
+  /** Nome original do conector da Pluggy (ex.: "MeuPluggy"). */
+  connectorName?: string;
+  /** Conector intermediário quando o nome exibido é outro (ex.: "Meu Pluggy"). */
+  via?: string | null;
+  logo?: InstitutionLogo;
+  icon?: string | null;
+  initials?: string;
+  /** Cor do texto legível sobre `primaryColor`. */
+  textColor?: string;
+  identitySource?: IdentitySource;
+  /** Texto dos dados que permitiu identificar o banco (detecção automática). */
+  detectedFrom?: string | null;
+}
+
+export type InstitutionLogo = 'image' | 'initials' | 'icon';
+
+/**
+ * De onde veio a identidade exibida:
+ * - connector: nome/logo do próprio conector da Pluggy (conexão direta com o banco)
+ * - detected: banco identificado automaticamente nos dados (conexões via Meu Pluggy)
+ * - user: definida pelo usuário
+ * - unidentified: conexão intermediária (Meu Pluggy) sem banco identificado
+ */
+export type IdentitySource = 'connector' | 'detected' | 'user' | 'unidentified';
+
+/** Identidade visual definida pelo usuário para uma conexão (Item). Guardada cifrada, só neste navegador. */
+export interface InstitutionIdentity {
+  name: string;
+  /** #RRGGBB */
+  color: string;
+  logo: InstitutionLogo;
+  icon: string | null;
+  /** Conector da Pluggy cujo logo é usado (catálogo GET /connectors). */
+  connectorId: number | null;
+  imageUrl: string | null;
+  updatedAt: string;
+}
+
+/** Dias de fechamento/vencimento definidos pelo usuário (usados quando a instituição não informa). */
+export interface CardCycleSetting {
+  /** 1–31 (meses mais curtos usam o último dia). */
+  closingDay: number | null;
+  dueDay: number | null;
+}
+
+export interface UserLabels {
+  /** Por itemId. */
+  identities: Record<string, InstitutionIdentity>;
+  /** Apelidos de contas e cartões, por id. */
+  nicknames: Record<string, string>;
+  /** Ciclo de fatura manual, por id do cartão. */
+  cardCycles: Record<string, CardCycleSetting>;
+}
+
+export const emptyLabels = (): UserLabels => ({ identities: {}, nicknames: {}, cardCycles: {} });
+
+/** Tolera registros salvos por versões anteriores (campos ausentes). */
+export function normalizeLabels(v: Partial<UserLabels> | null | undefined): UserLabels {
+  return { identities: v?.identities ?? {}, nicknames: v?.nicknames ?? {}, cardCycles: v?.cardCycles ?? {} };
+}
+
+/** Subconjunto do catálogo de conectores da Pluggy (GET /connectors) usado para logo e cor. */
+export interface ConnectorInfo {
+  id: number;
+  name: string;
+  imageUrl: string | null;
+  primaryColor: string | null;
+  type: string | null;
+  isOpenFinance: boolean;
 }
 
 export interface NormalizedItem {
@@ -38,6 +108,8 @@ export interface NormalizedItem {
 
 export type AccountKind = 'checking' | 'savings' | 'other';
 
+export const ACCOUNT_TYPE_LABEL: Record<AccountKind, string> = { checking: 'Conta corrente', savings: 'Poupança', other: 'Conta' };
+
 export interface NormalizedAccount {
   id: string;
   itemId: string;
@@ -55,6 +127,12 @@ export interface NormalizedAccount {
   automaticallyInvested: number | null;
   /** Soma de saldos reservados ("caixinhas") informada pela instituição (informativo). */
   reservedTotal: number | null;
+  // ---- Apresentação (camada de identidade) ----
+  /** Nome original informado pela instituição, quando o exibido é outro. */
+  rawName?: string;
+  nickname?: string | null;
+  /** "Instituição · Nome" — para contextos em que a instituição não aparece ao lado. */
+  label?: string;
 }
 
 export interface NormalizedCard {
@@ -80,6 +158,13 @@ export interface NormalizedCard {
   holderType: string | null;
   isOpenFinance: boolean;
   updatedAt: string | null;
+  // ---- Apresentação (camada de identidade) ----
+  rawName?: string;
+  nickname?: string | null;
+  label?: string;
+  /** Dias definidos pelo usuário — usados só quando a instituição não informa fechamento/vencimento. */
+  manualClosingDay?: number | null;
+  manualDueDay?: number | null;
 }
 
 export interface NormalizedBill {

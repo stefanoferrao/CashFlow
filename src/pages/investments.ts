@@ -11,7 +11,7 @@ import { INVESTMENT_CLASS_LABEL, type NormalizedInvestment } from '../models/fin
 import type { PageContext } from '../router';
 import { store } from '../state/store';
 import { formatDate, formatMoney, formatNumber, formatPercent, formatShortDate } from '../utils/format';
-import { CLASS_COLOR, analytics, canvasFor, chartFrame, commonHandlers, dataTable, hasAnyData, noDataState, onDataChange, tableToggle } from './shared';
+import { CLASS_COLOR, analytics, canvasFor, chartFrame, commonHandlers, dataTable, hasAnyData, instLabel, noDataState, onDataChange, tableToggle } from './shared';
 
 const SUBTYPE_LABEL: Record<string, string> = {
   CDB: 'CDB',
@@ -69,7 +69,12 @@ export function mount(ctx: PageContext): () => void {
     const br = a.investmentBreakdown;
     const ret = a.investmentReturn;
     const byInst = new Map<string, number>();
-    for (const i of invs) if (i.currency === 'BRL') byInst.set(i.institution, (byInst.get(i.institution) ?? 0) + i.value);
+    const itemOfInst = new Map<string, string>();
+    for (const i of invs) {
+      if (i.currency !== 'BRL') continue;
+      byInst.set(i.institution, (byInst.get(i.institution) ?? 0) + i.value);
+      if (!itemOfInst.has(i.institution)) itemOfInst.set(i.institution, i.itemId);
+    }
     const instTotal = [...byInst.values()].reduce((x, y) => x + y, 0);
     const snaps = s.dataset.snapshots.filter((x) => x.investments > 0);
     const others = Object.entries(a.totalInvestments.others);
@@ -123,7 +128,7 @@ export function mount(ctx: PageContext): () => void {
                   .sort((x, y) => y[1] - x[1])
                   .map(
                     ([name, v]) => html`<div class="dist-row">
-                      <span class="dist-row__label">${icon('bank')}${name}</span>
+                      <span class="dist-row__label">${instLabel(itemOfInst.get(name) ?? '', name, 'sm')}</span>
                       <span class="dist-row__value">${money(v)} <span class="muted">${formatPercent(instTotal ? v / instTotal : 0)}</span></span>
                       <div class="dist-row__bar"><span style="width:${((instTotal ? v / instTotal : 0) * 100).toFixed(1)}%;background:var(--series-3)"></span></div>
                     </div>`,
@@ -145,7 +150,7 @@ export function mount(ctx: PageContext): () => void {
               return [
                 html`<strong>${i.name}</strong>`,
                 html`${INVESTMENT_CLASS_LABEL[i.investmentClass]}<br /><span class="muted" style="font-size:12px">${i.subtype ? SUBTYPE_LABEL[i.subtype] ?? i.subtype : i.type}</span>`,
-                i.institution,
+                instLabel(i.itemId, i.institution),
                 rateText(i),
                 i.dueDate ? formatDate(i.dueDate) : '—',
                 r !== null ? html`<span class="${r >= 0 ? 'pos' : 'neg'}">${formatPercent(r, true)}</span>` : r12 !== null ? html`${formatPercent(r12, true)} <span class="muted" style="font-size:11px">12m</span>` : html`<span class="muted" title="Dados não disponíveis pela instituição">—</span>`,

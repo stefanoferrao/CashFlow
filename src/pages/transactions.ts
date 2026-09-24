@@ -5,7 +5,7 @@
 import { delegate, html, render, type SafeHtml } from '../components/dom';
 import { icon } from '../components/icons';
 import { confirmDialog, openModal } from '../components/modal';
-import { badge, categoryIcon, categoryLabel, money, stateBlock } from '../components/ui';
+import { badge, categoryIcon, categoryLabel, instLogo, money, stateBlock } from '../components/ui';
 import { APP_CONFIG } from '../config/app.config';
 import { APP_CATEGORIES, TRANSACTION_KIND_LABEL, type AppCategoryId, type NormalizedTransaction } from '../models/finance';
 import type { PageContext } from '../router';
@@ -16,7 +16,7 @@ import * as actions from '../state/actions';
 import { store } from '../state/store';
 import { debounce } from '../utils/async';
 import { formatDate, formatMoney, formatSignedMoney } from '../utils/format';
-import { analytics, commonHandlers, hasAnyData, noDataState, onDataChange } from './shared';
+import { analytics, commonHandlers, hasAnyData, institutionOf, noDataState, onDataChange } from './shared';
 
 const TYPE_OPTIONS: Array<[TxFilters['type'], string]> = [
   ['all', 'Todos'],
@@ -59,6 +59,11 @@ export function mount(ctx: PageContext): () => void {
   };
   const sourceName = (t: NormalizedTransaction) => accountName.get(t.accountId ?? t.cardId ?? '') ?? t.institution;
 
+  const instBadge = (itemId: string, name: string, size: 'xs' | 'sm') => {
+    const inst = institutionOf(itemId);
+    return instLogo(inst ?? { name, imageUrl: null, primaryColor: null }, size);
+  };
+
   const option = (value: string, label: string, current: string) => html`<option value="${value}" ${value === current ? 'selected' : ''}>${label}</option>`;
 
   const paintShell = () => {
@@ -95,9 +100,9 @@ export function mount(ctx: PageContext): () => void {
             <label class="field" data-custom-range ${filters.period === 'custom' ? '' : 'hidden'}><span class="field__label">De</span><input class="input input--sm" type="date" data-filter="from" value="${filters.from ?? ''}" /></label>
             <label class="field" data-custom-range ${filters.period === 'custom' ? '' : 'hidden'}><span class="field__label">Até</span><input class="input input--sm" type="date" data-filter="to" value="${filters.to ?? ''}" /></label>
             <label class="field"><span class="field__label">Conta</span>
-              <select class="select select--sm" data-filter="account">${option('', 'Todas', filters.account)}${ds.accounts.map((a) => option(a.id, `${a.name} · ${a.institution}`, filters.account))}</select></label>
+              <select class="select select--sm" data-filter="account">${option('', 'Todas', filters.account)}${ds.accounts.map((a) => option(a.id, `${a.institution} · ${a.name}`, filters.account))}</select></label>
             <label class="field"><span class="field__label">Cartão</span>
-              <select class="select select--sm" data-filter="card">${option('', 'Todos', filters.card)}${ds.cards.map((c) => option(c.id, `${c.name} · ${c.institution}`, filters.card))}</select></label>
+              <select class="select select--sm" data-filter="card">${option('', 'Todos', filters.card)}${ds.cards.map((c) => option(c.id, `${c.institution} · ${c.name}`, filters.card))}</select></label>
             <label class="field"><span class="field__label">Instituição</span>
               <select class="select select--sm" data-filter="institution">${option('', 'Todas', filters.institution)}${institutions.map((i) => option(i, i, filters.institution))}</select></label>
             <label class="field"><span class="field__label">Categoria</span>
@@ -171,7 +176,7 @@ export function mount(ctx: PageContext): () => void {
                   (t) => html`<tr data-clickable data-action="open-tx" data-value="${t.id}" tabindex="0" aria-label="${t.description}, ${formatSignedMoney(t.amount, t.currency)}">
                     <td class="nowrap num">${formatDate(t.date)}</td>
                     <td><div class="tx-desc">${categoryIcon(t.category)}<div class="tx-desc__text"><strong title="${t.description}">${t.description}</strong><span class="row" style="gap:6px">${t.subcategory ?? t.providerCategory ?? ''}${txBadges(t)}</span></div></div></td>
-                    <td><div class="tx-desc__text"><span style="font-size:13px;color:var(--text)">${sourceName(t)}</span><span>${t.institution}</span></div></td>
+                    <td><div class="tx-desc">${instBadge(t.itemId, t.institution, 'sm')}<div class="tx-desc__text"><span style="font-size:13px;color:var(--text)">${sourceName(t)}</span><span>${t.institution}</span></div></div></td>
                     <td>${categoryLabel(t.category)}${t.userCategorized ? html` <span class="badge badge--accent" title="Alterada por você">editada</span>` : ''}</td>
                     <td><span class="muted" style="font-size:12px">${TRANSACTION_KIND_LABEL[t.kind]}</span></td>
                     <td class="num">${money(t.amount, { currency: t.currency, signed: true, tone: true })}</td>
@@ -186,7 +191,7 @@ export function mount(ctx: PageContext): () => void {
                 <div class="list">${g.items.map(
                   (t) => html`<button type="button" class="list-item" data-action="open-tx" data-value="${t.id}">
                     ${categoryIcon(t.category)}
-                    <span class="list-item__main"><span class="list-item__title">${t.description}</span><span class="list-item__sub">${categoryLabel(t.category)} · ${sourceName(t)}</span></span>
+                    <span class="list-item__main"><span class="list-item__title">${t.description}</span><span class="list-item__sub"><span class="inst-name">${instBadge(t.itemId, t.institution, 'xs')}<span class="inst-name__text">${t.institution} · ${sourceName(t)} · ${categoryLabel(t.category)}</span></span></span></span>
                     <span class="list-item__end">${money(t.amount, { currency: t.currency, signed: true, tone: true })}<span class="row" style="gap:4px">${txBadges(t)}</span></span>
                   </button>`,
                 )}</div>`,
@@ -314,7 +319,7 @@ export function mount(ctx: PageContext): () => void {
     const m = openModal({
       title: 'Transação',
       body: html`
-        <div class="row">${categoryIcon(t.category)}<div class="stack-sm" style="gap:2px;min-width:0"><strong>${t.description}</strong><span class="muted" style="font-size:13px">${formatDate(t.date)} · ${sourceName(t)} · ${t.institution}</span></div></div>
+        <div class="row">${categoryIcon(t.category)}<div class="stack-sm" style="gap:2px;min-width:0"><strong>${t.description}</strong><span class="muted" style="font-size:13px">${formatDate(t.date)} · ${t.institution} · ${sourceName(t)}</span></div></div>
         <div class="figure"><div class="figure__value ${t.amount < 0 ? 'neg' : 'pos'}"><span class="money">${formatSignedMoney(t.amount, t.currency)}</span></div></div>
         <div class="kv-list">
           <div class="kv"><span>Tipo</span><strong>${TRANSACTION_KIND_LABEL[t.kind]}</strong></div>

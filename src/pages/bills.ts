@@ -4,12 +4,12 @@
 import { lineChart, mountChart } from '../charts/charts';
 import { animateNumbers, delegate, html, render } from '../components/dom';
 import { icon } from '../components/icons';
-import { badge, categoryIcon, figureValue, infoTip, money, na, segmented } from '../components/ui';
+import { badge, categoryIcon, figureValue, infoTip, instLogo, money, na, segmented } from '../components/ui';
 import type { PageContext } from '../router';
 import { calculateFutureCardCharges } from '../services/financialCalculator';
 import { store } from '../state/store';
 import { formatDate, formatMoney, formatMonthKey, formatShortDate } from '../utils/format';
-import { analytics, canvasFor, chartFrame, commonHandlers, dataTable, hasAnyData, noDataState, onDataChange, tableToggle } from './shared';
+import { analytics, canvasFor, chartFrame, commonHandlers, dataTable, hasAnyData, institutionOf, noDataState, onDataChange, tableToggle } from './shared';
 
 export function mount(ctx: PageContext): () => void {
   const root = ctx.root;
@@ -41,18 +41,33 @@ export function mount(ctx: PageContext): () => void {
       html`<div class="page">
         <div class="page-head">
           <p class="page-head__intro">A fatura aberta não é fornecida pela Pluggy: ela é calculada a partir das transações do ciclo atual. Faturas fechadas vêm da instituição.</p>
-          ${cards.length > 1 ? segmented('select-card', cards.map((c) => ({ value: c.id, label: c.name })), card.id, 'Cartão') : ''}
+          ${cards.length > 1
+            ? segmented(
+                'select-card',
+                cards.map((c) => {
+                  const inst = institutionOf(c.itemId);
+                  return { value: c.id, label: html`<span class="inst-name">${inst ? instLogo(inst, 'xs') : ''}<span class="inst-name__text">${c.name}</span></span>` };
+                }),
+                card.id,
+                'Cartão',
+              )
+            : ''}
         </div>
 
         ${!summary || !proj
-          ? html`<div class="card">${na('Datas de fechamento/vencimento não informadas pela instituição — não é possível montar o ciclo da fatura.')}</div>`
+          ? html`<div class="card"><div class="stack" style="align-items:flex-start">${na('Datas de fechamento/vencimento não informadas pela instituição — não é possível montar o ciclo da fatura.')}
+              <button type="button" class="btn btn--primary btn--sm" data-action="edit-card-cycle" data-value="${card.id}">${icon('calendar')}Definir fechamento e vencimento</button></div></div>`
           : html`
           <section class="card">
             <div class="bill-hero">
               <div class="stack">
                 <div class="row-between wrap">
-                  <span class="card__title">${icon('receipt')}Previsão da próxima fatura · ${card.name}</span>
-                  ${summary.cycle.estimated ? badge('Datas estimadas', 'warn', 'info') : badge(`Vence em ${formatDate(summary.cycle.due)}`, 'neutral', 'calendar')}
+                  <span class="card__title">${icon('receipt')}Previsão da próxima fatura · ${card.label ?? card.name}</span>
+                  ${summary.cycle.source === 'user'
+                    ? badge(`Vence em ${formatDate(summary.cycle.due)} · dias definidos por você`, 'neutral', 'calendar')
+                    : summary.cycle.estimated
+                      ? badge('Datas estimadas', 'warn', 'info')
+                      : badge(`Vence em ${formatDate(summary.cycle.due)}`, 'neutral', 'calendar')}
                 </div>
                 ${figureValue(proj.forecast, 'hero', cur)}
                 <div class="breakdown">
