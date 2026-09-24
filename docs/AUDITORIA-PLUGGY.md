@@ -135,3 +135,16 @@ Fases 3–24 conforme solicitado, com validação (typecheck, testes, build, scr
 As decisões acima foram implementadas como descritas. Detalhes de uso, arquitetura final e modelo de segurança estão em
 [`README.md`](../README.md) e [`SECURITY.md`](../SECURITY.md). Os formatos de payload usados nos testes E2E (API simulada)
 seguem os tipos do SDK oficial listados na seção 6.
+
+## 12. Revisão 1.2.0 (24/09/2026)
+
+| Tema | Documentação | Decisão no app |
+|---|---|---|
+| `POST /connect_token` — `options` | `clientUserId`, `webhookUrl`, `oauthRedirectUri`, `avoidDuplicates` ([referência](https://docs.pluggy.ai/reference/connect-token-create)) | Envia `clientUserId` fixo (SHA-256 do Client ID), `avoidDuplicates: true` e, em https, `oauthRedirectUri` = endereço do app. Se a Pluggy recusar o endereço (400), tenta de novo sem ele |
+| Conexão repetida | Com `avoidDuplicates`, a Pluggy devolve 400 com os IDs dos Items que já usam as mesmas credenciais (`data.items`); no widget chega como `onError({ message: 'ITEM_USER_ALREADY_EXISTS', data: { items } })` e a tela mostra só "Um erro inesperado ocorreu" | O app lê os IDs e registra o Item existente (o mais saudável e recente) em vez de mostrar erro |
+| Cada consentimento cria um Item novo | FAQ da Pluggy | Conexões repetidas antigas (mesmo conector e mesmas contas/cartões) ficam fora dos totais; *Contas → Remover repetidas* as remove e exclui na Pluggy (`DELETE /items/{id}`) |
+| OAuth (Open Finance / Meu Pluggy) | `oauthRedirectUri` precisa ser https ou deep link; no desktop a janela tenta fechar sozinha, no celular o usuário é redirecionado ([guia](https://docs.pluggy.ai/docs/oauth-support-guide)) | Endereço enviado só em https; se o retorno trouxer um `itemId`, ele é registrado ao desbloquear |
+| Itens do Meu Pluggy | "Proxy Items" não aceitam atualização pela API | "Reconectar" leva ao Meu Pluggy |
+| Movimentações de investimento | `GET /investments/{id}/transactions` (BUY, SELL, TAX, TRANSFER, INTEREST, AMORTIZATION; `quantity`, `value`, `amount`, `netAmount`) | Base do rendimento quando o histórico está completo (quantidade conferida ou desde a data da aplicação) |
+| Taxas de rentabilidade | `lastMonthRate`, `lastTwelveMonthsRate`, `annualRate` vêm em **percentual** (ex.: 3.24) | Convertidas para fração na normalização |
+| Campos de investimento | `balance` = líquido, `amount` = bruto, `amountOriginal` = aplicado, `amountProfit` = lucro líquido, `purchaseDate`, `issueDate`, `quantity` | Rendimento bruto = `amount` + resgates − aplicado; líquido = bruto − (`amount` − `balance`) |
