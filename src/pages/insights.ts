@@ -6,11 +6,12 @@
 import { barChart, lineChart, mountChart } from '../charts/charts';
 import { animateNumbers, delegate, html, render, type SafeHtml } from '../components/dom';
 import { icon } from '../components/icons';
-import { badge, categoryIcon, categoryLabel, delta, infoTip, money, na } from '../components/ui';
+import { badge, categoryIcon, categoryLabel, delta, infoTip, legend, money, na } from '../components/ui';
 import type { PageContext } from '../router';
-import { cardDebt } from '../services/financialCalculator';
+import { calculateNetWorthHistory, cardDebt } from '../services/financialCalculator';
+import { diffDays } from '../utils/dates';
 import { store } from '../state/store';
-import { formatDate, formatMoney, formatMonthKey, formatPercent, formatShortDate } from '../utils/format';
+import { formatDate, formatMoney, formatMonthKey, formatMonthKeyShort, formatPercent, formatShortDate } from '../utils/format';
 import { analytics, canvasFor, chartFrame, commonHandlers, dataTable, hasAnyData, noDataState, onDataChange, tableToggle } from './shared';
 
 function indicator(label: string, value: SafeHtml | string, meta?: SafeHtml | string, tip?: string): SafeHtml {
@@ -36,7 +37,7 @@ export function mount(ctx: PageContext): () => void {
     const economy = a.month.income - a.month.expenses;
     const top = a.categoryMonth[0];
     const g = a.netWorthGrowth30;
-    const snaps = ds.snapshots;
+    const hist = calculateNetWorthHistory(ds.accounts, a.transactions, ds.snapshots, a.today);
     const subs = a.recurrences;
 
     render(
@@ -70,28 +71,56 @@ export function mount(ctx: PageContext): () => void {
             : na('Ainda não há dados suficientes para gerar insights')}
         </section>
 
-        <div class="grid">
-          <section class="card col-7">
-            <div class="card__head"><div class="card__title card__title--lg">Patrimônio ao longo do tempo</div>${snaps.length >= 2 ? tableToggle('an-nw') : ''}</div>
-            ${snaps.length >= 2
-              ? chartFrame('an-nw', 260, 'Evolução do patrimônio líquido', {
-                  caption: 'Patrimônio líquido registrado',
-                  headers: ['Data', 'Patrimônio líquido', 'Contas', 'Investimentos', 'Dívida de cartões'],
-                  rows: snaps.map((x) => [formatDate(x.date), money(x.netWorth), money(x.accounts), money(x.investments), money(x.cardDebt)]),
-                })
-              : na('O app registra um ponto por dia sincronizado. A evolução aparece a partir do segundo registro (a Pluggy não fornece histórico de patrimônio).')}
-          </section>
-          <section class="card col-5">
-            <div class="card__head"><div class="card__title card__title--lg">Gastos por categoria · mês</div>${a.categoryMonth.length ? tableToggle('an-cat') : ''}</div>
-            ${a.categoryMonth.length
-              ? chartFrame('an-cat', Math.max(160, a.categoryMonth.length * 36), 'Gastos do mês por categoria', {
-                  caption: 'Gastos por categoria no mês',
-                  headers: ['Categoria', 'Total', 'Participação'],
-                  rows: a.categoryMonth.map((c) => [categoryLabel(c.category), money(c.total), formatPercent(c.share)]),
-                })
-              : na('Sem despesas no mês')}
-          </section>
-        </div>
+        <section class="card">
+          <div class="card__head">
+            <div class="stack-sm">
+              <div class="card__title card__title--lg">Patrimônio ao longo do tempo</div>
+              <span class="muted" style="font-size:13px">Somente valores confiáveis: o saldo das contas é reconstruído pelas transações; o patrimônio completo aparece nos dias registrados pelo app.</span>
+            </div>
+            ${hist.points.length >= 2 ? tableToggle('an-nw') : ''}
+          </div>
+          <div class="kpi-grid kpi-grid--inline">
+            <div class="figure"><span class="figure__label">Patrimônio líquido hoje</span><div class="figure__value figure__value--sm"><span class="money">${formatMoney(a.netWorth.netWorth)}</span></div></div>
+            <div class="figure"><span class="figure__label">Variação registrada ${infoTip('Diferença entre o primeiro e o último registro de patrimônio feito pelo app (um por dia sincronizado). Inclui contas, investimentos e dívidas exatamente como as instituições informaram naquele dia.')}</span>
+              ${hist.recordedChange
+                ? html`<div class="figure__value figure__value--sm ${hist.recordedChange.change < 0 ? 'neg' : 'pos'}"><span class="money">${hist.recordedChange.change >= 0 ? '+' : '−'}${formatMoney(Math.abs(hist.recordedChange.change))}</span></div><span class="muted" style="font-size:12px">desde ${formatDate(hist.recordedChange.from)} · ${hist.recordedCount} registros</span>`
+                : html`<div class="figure__value figure__value--sm muted">—</div><span class="muted" style="font-size:12px">${hist.recordedCount === 1 ? '1 registro até agora' : 'Nenhum registro ainda'}</span>`}
+            </div>
+            <div class="figure"><span class="figure__label">Saldo em contas ${infoTip('Reconstruído de trás para frente: saldo atual − transações posteriores a cada data. Exato a partir da primeira transação disponível de cada instituição.')}</span>
+              ${hist.accountsChange
+                ? html`<div class="figure__value figure__value--sm ${hist.accountsChange.change < 0 ? 'neg' : 'pos'}"><span class="money">${hist.accountsChange.change >= 0 ? '+' : '−'}${formatMoney(Math.abs(hist.accountsChange.change))}</span></div><span class="muted" style="font-size:12px">desde ${formatDate(hist.accountsChange.from)}</span>`
+                : html`<div class="figure__value figure__value--sm muted">—</div><span class="muted" style="font-size:12px">Sem transações suficientes</span>`}
+            </div>
+          </div>
+          ${hist.points.length >= 2
+            ? html`${legend([
+                { label: 'Patrimônio líquido (registrado)', color: 'var(--series-3)' },
+                { label: 'Saldo em contas (reconstruído)', color: 'var(--series-1)' },
+              ])}
+              ${chartFrame('an-nw', 280, 'Patrimônio líquido registrado e saldo em contas reconstruído ao longo do tempo', {
+                caption: 'Patrimônio ao longo do tempo',
+                headers: ['Data', 'Patrimônio líquido (registrado)', 'Saldo em contas (reconstruído)', 'Investimentos (registrado)', 'Dívida de cartões (registrado)'],
+                rows: hist.points
+                  .filter((p, i, arr) => p.netWorth !== null || i % 2 === 0 || i === arr.length - 1)
+                  .map((p) => [formatDate(p.date), p.netWorth !== null ? money(p.netWorth) : '—', p.accounts !== null ? money(p.accounts) : '—', p.investments !== null ? money(p.investments) : '—', p.cardDebt !== null ? money(p.cardDebt) : '—']),
+              })}`
+            : na('Ainda não há dados suficientes: o saldo das contas precisa de transações e o patrimônio completo é registrado a cada dia sincronizado.')}
+          <div class="callout callout--info">${icon('info')}<div>
+            <strong>Por que investimentos e dívidas não são reconstruídos?</strong> A Pluggy informa só o valor <em>atual</em> de cada investimento e o limite usado <em>hoje</em> no cartão. Estimar o passado deles mostraria um histórico que não aconteceu. Por isso o patrimônio completo aparece apenas nos dias em que o app registrou os valores (um ponto por dia sincronizado)${hist.firstRecorded ? html` — registros desde <strong>${formatDate(hist.firstRecorded)}</strong>` : ''}.
+            ${hist.excludedAccounts ? html` ${hist.excludedAccounts} conta(s) sem transações disponíveis ficaram fora da reconstrução do saldo.` : ''}
+          </div></div>
+        </section>
+
+        <section class="card">
+          <div class="card__head"><div class="card__title card__title--lg">Gastos por categoria · mês</div>${a.categoryMonth.length ? tableToggle('an-cat') : ''}</div>
+          ${a.categoryMonth.length
+            ? chartFrame('an-cat', Math.max(160, a.categoryMonth.length * 36), 'Gastos do mês por categoria', {
+                caption: 'Gastos por categoria no mês',
+                headers: ['Categoria', 'Total', 'Participação'],
+                rows: a.categoryMonth.map((c) => [categoryLabel(c.category), money(c.total), formatPercent(c.share)]),
+              })
+            : na('Sem despesas no mês')}
+        </section>
 
         <section class="card">
           <div class="card__head">
@@ -122,7 +151,18 @@ export function mount(ctx: PageContext): () => void {
 
     const nw = canvasFor(root, 'an-nw');
     if (nw) {
-      void mountChart(nw, lineChart(snaps.map((x) => formatShortDate(x.date)), [{ label: 'Patrimônio líquido', data: snaps.map((x) => x.netWorth), colorIndex: 3, fill: true }], { maxTicksX: 8 }));
+      const long = hist.points.length > 1 && diffDays(hist.points[0]!.date, hist.points[hist.points.length - 1]!.date) > 300;
+      void mountChart(
+        nw,
+        lineChart(
+          hist.points.map((x) => (long ? formatMonthKeyShort(x.date.slice(0, 7)) : formatShortDate(x.date))),
+          [
+            { label: 'Patrimônio líquido (registrado)', data: hist.points.map((x) => x.netWorth), colorIndex: 3, points: true },
+            { label: 'Saldo em contas (reconstruído)', data: hist.points.map((x) => x.accounts), colorIndex: 1, fill: true },
+          ],
+          { maxTicksX: 8 },
+        ),
+      );
     }
     const cat = canvasFor(root, 'an-cat');
     if (cat) void mountChart(cat, barChart(a.categoryMonth.map((c) => categoryLabel(c.category)), [{ label: 'Gastos', data: a.categoryMonth.map((c) => c.total), colorIndex: 2 }], { horizontal: true }));

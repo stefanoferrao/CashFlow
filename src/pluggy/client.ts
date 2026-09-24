@@ -20,6 +20,7 @@ import type {
   PluggyCategory,
   PluggyConnector,
   PluggyInvestment,
+  PluggyInvestmentTransaction,
   PluggyItem,
   PluggyTransaction,
 } from './types';
@@ -278,13 +279,34 @@ export class PluggyClient {
     return this.getAllPages<PluggyConnector>(onlyBrazil ? '/connectors?countries=BR' : '/connectors');
   }
 
-  /** POST /connect_token — token de 30 min para o widget Pluggy Connect. */
-  async createConnectToken(itemId?: string): Promise<string> {
-    const body: { itemId?: string; options: { avoidDuplicates: boolean } } = { options: { avoidDuplicates: true } };
-    if (itemId) body.itemId = itemId;
+  /**
+   * POST /connect_token — token de 30 min para o widget Pluggy Connect.
+   * - `clientUserId`: identificador estável do usuário (a Pluggy agrupa os Items por ele e o usa na checagem de duplicidade).
+   * - `avoidDuplicates`: a Pluggy recusa criar um Item repetido (mesmas credenciais) e devolve os IDs dos Items já existentes.
+   * - `oauthRedirectUri`: para onde a Pluggy devolve o usuário depois da autorização no banco (Open Finance / Meu Pluggy).
+   *   Só é aceita em https (nunca http/localhost).
+   * - `itemId`: modo atualização de um Item existente (reconectar) — não cria outro.
+   */
+  async createConnectToken(opts: { itemId?: string; clientUserId?: string; oauthRedirectUri?: string; avoidDuplicates?: boolean } = {}): Promise<string> {
+    const options: Record<string, string | boolean> = {};
+    if (opts.clientUserId) options.clientUserId = opts.clientUserId;
+    if (opts.avoidDuplicates !== false) options.avoidDuplicates = true;
+    if (opts.oauthRedirectUri) options.oauthRedirectUri = opts.oauthRedirectUri;
+    const body: { itemId?: string; options: Record<string, string | boolean> } = { options };
+    if (opts.itemId) body.itemId = opts.itemId;
     const res = await this.request<{ accessToken: string }>('/connect_token', { method: 'POST', body });
     if (!res?.accessToken) throw new PluggyError('unknown', { debugDetail: 'connect_token sem accessToken' });
     return res.accessToken;
+  }
+
+  /** DELETE /items/{id} — exclui o Item na Pluggy (revoga o acesso desta aplicação aos dados daquela conexão). */
+  async deleteItem(itemId: string): Promise<void> {
+    await this.request<unknown>(`/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+  }
+
+  /** GET /investments/{id}/transactions — movimentações do produto (aplicações, resgates, rendimentos pagos, impostos). */
+  async getInvestmentTransactions(investmentId: string): Promise<PluggyInvestmentTransaction[]> {
+    return this.getAllPages<PluggyInvestmentTransaction>(`/investments/${encodeURIComponent(investmentId)}/transactions?pageSize=500`);
   }
 
   /** PATCH /items/{id} — pede à Pluggy uma nova coleta na instituição (limite: 20/min). */

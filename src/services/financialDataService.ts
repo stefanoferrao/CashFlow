@@ -11,13 +11,15 @@ import {
   type NormalizedCard,
   type NormalizedInstitution,
   type NormalizedInvestment,
+  type DuplicateItem,
+  type InvestmentMovement,
   type NormalizedItem,
   type NormalizedTransaction,
   type TransactionKind,
   emptyDataset,
 } from '../models/finance';
 import { describeItemExecution } from '../pluggy/errors';
-import type { PluggyAccount, PluggyBill, PluggyInvestment, PluggyItem, PluggyTransaction, RawItemBundle } from '../pluggy/types';
+import type { PluggyAccount, PluggyBill, PluggyInvestment, PluggyInvestmentTransaction, PluggyItem, PluggyTransaction, RawItemBundle } from '../pluggy/types';
 import { apiDateToKey } from '../utils/dates';
 import {
   CategoryResolver,
@@ -262,7 +264,36 @@ export function investmentClassOf(type: string, subtype: string | null): Investm
   }
 }
 
-export function normalizeInvestment(inv: PluggyInvestment, fallbackInstitution: string): NormalizedInvestment {
+/** Taxas de rentabilidade da Pluggy vêm em PERCENTUAL (ex.: 3.24 = 3,24%) → fração. */
+function pctToFraction(v: number | null | undefined): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v / 100 : null;
+}
+
+const MOVEMENT_TYPES = new Set(['BUY', 'SELL', 'TAX', 'TRANSFER', 'INTEREST', 'AMORTIZATION']);
+
+/** Movimentações de um investimento → modelo interno (valor bruto positivo e sentido do dinheiro). */
+export function normalizeInvestmentMovements(txs: PluggyInvestmentTransaction[] | null | undefined): InvestmentMovement[] | null {
+  if (!txs) return null;
+  const out: InvestmentMovement[] = [];
+  for (const t of txs) {
+    const date = apiDateToKey(t.tradeDate ?? t.date) ?? apiDateToKey(t.date);
+    if (!date) continue;
+    const type = (MOVEMENT_TYPES.has(String(t.type).toUpperCase()) ? String(t.type).toUpperCase() : 'OTHER') as InvestmentMovement['type'];
+    const qty = typeof t.quantity === 'number' && Number.isFinite(t.quantity) ? Math.abs(t.quantity) : null;
+    const rawAmount = typeof t.amount === 'number' && Number.isFinite(t.amount) ? t.amount : typeof t.netAmount === 'number' ? t.netAmount : qty !== null && typeof t.value === 'number' ? qty * t.value : null;
+    if (rawAmount === null) continue;
+    const mt = String(t.movementType ?? '').toUpperCase();
+    // O tipo define o sentido sem ambiguidade; só a transferência depende do movementType.
+    let direction: InvestmentMovement['direction'];
+    if (type === 'BUY') direction = 'in';
+    else if (type === 'SELL' || type === 'INTEREST' || type === 'AMORTIZATION' || type === 'TAX') direction = 'out';
+    else direction = mt === 'CREDIT' ? 'in' : mt === 'DEBIT' ? 'out' : null;
+    out.push({ date, type, direction, amount: round2(Math.abs(rawAmount)), quantity: qty });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3000);
+}
+
+export function normalizeInvestment(inv: PluggyInvestment, fallbackInstitution: string, txs?: PluggyInvestmentTransaction[] | null): NormalizedInvestment {
   return {
     id: inv.id,
     itemId: inv.itemId,
@@ -281,10 +312,14 @@ export function normalizeInvestment(inv: PluggyInvestment, fallbackInstitution: 
     rate: inv.rate ?? null,
     rateType: inv.rateType ?? null,
     fixedAnnualRate: inv.fixedAnnualRate ?? null,
-    lastMonthRate: inv.lastMonthRate ?? null,
-    lastTwelveMonthsRate: inv.lastTwelveMonthsRate ?? null,
+    lastMonthRate: pctToFraction(inv.lastMonthRate),
+    lastTwelveMonthsRate: pctToFraction(inv.lastTwelveMonthsRate),
     status: inv.status ?? null,
     referenceDate: apiDateToKey(inv.date),
+    purchaseDate: apiDateToKey(inv.purchaseDate),
+    issueDate: apiDateToKey(inv.issueDate),
+    quantity: typeof inv.quantity === 'number' && Number.isFinite(inv.quantity) ? inv.quantity : null,
+    movements: normalizeInvestmentMovements(txs),
   };
 }
 
@@ -321,17 +356,73 @@ export function normalizeBundle(bundle: RawItemBundle, resolver: CategoryResolve
       if (nb) bills.push(nb);
     }
   }
-  const investments = bundle.investments.map((i) => normalizeInvestment(i, inst.name));
+  const investments = bundle.investments.map((i) => normalizeInvestment(i, inst.name, bundle.investmentTransactions?.[i.id] ?? null));
   return { item, accounts, cards, bills, transactions, investments, warnings: bundle.warnings, fetchedAt: new Date().toISOString() };
 }
 
-/** Junta dados de vários Items num único dataset, sem duplicar IDs. */
+const normText = (s: string) =>
+  s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/**
+ * "Impressão digital" das contas e cartões de um Item. Só usa produtos com número (final da conta/cartão):
+ * sem número não há como afirmar que são as mesmas contas → devolve null (não compara).
+ */
+function itemFingerprint(p: NormalizedItemData): Set<string> | null {
+  const out = new Set<string>();
+  for (const a of p.accounts) {
+    if (!a.lastDigits) return null;
+    out.add(`acc|${a.type}|${a.lastDigits}|${a.currency}`);
+  }
+  for (const c of p.cards) {
+    if (!c.lastFourDigits) return null;
+    out.add(`card|${c.lastFourDigits}|${normText(c.brand ?? '')}|${c.currency}`);
+  }
+  return out.size ? out : null;
+}
+
+/**
+ * Conexões repetidas: mesmo conector da Pluggy e todas as contas/cartões contidos em outra conexão.
+ * Fica a mais recente (última coleta); a outra é marcada como repetida.
+ */
+export function findDuplicateItems(parts: NormalizedItemData[]): DuplicateItem[] {
+  const fps = parts.map((p) => ({ p, fp: itemFingerprint(p), at: p.item.lastUpdatedAt ?? p.fetchedAt ?? '' }));
+  const out: DuplicateItem[] = [];
+  const dropped = new Set<string>();
+  for (const a of fps) {
+    if (!a.fp || a.p.item.institution.connectorId === null) continue;
+    for (const b of fps) {
+      if (a === b || !b.fp || dropped.has(b.p.item.id) || b.p.item.institution.connectorId !== a.p.item.institution.connectorId) continue;
+      const contained = [...a.fp].every((k) => b.fp!.has(k));
+      if (!contained) continue;
+      // Mesmo conjunto: fica a coleta mais recente (empate: a que aparece depois). Subconjunto estrito: fica a maior.
+      const same = a.fp.size === b.fp.size;
+      const aIsOlder = !same || a.at < b.at || (a.at === b.at && fps.indexOf(a) < fps.indexOf(b));
+      if (aIsOlder) {
+        out.push({ itemId: a.p.item.id, duplicateOf: b.p.item.id });
+        dropped.add(a.p.item.id);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** Junta dados de vários Items num único dataset, sem duplicar IDs nem conexões repetidas. */
 export function mergeItemData(parts: NormalizedItemData[], snapshots: FinancialDataset['snapshots'] = []): FinancialDataset {
   const ds = emptyDataset('pluggy');
   const seen = { acc: new Set<string>(), card: new Set<string>(), bill: new Set<string>(), tx: new Set<string>(), inv: new Set<string>() };
   let latest: string | null = null;
+  const duplicates = findDuplicateItems(parts);
+  const skip = new Set(duplicates.map((d) => d.itemId));
+  if (duplicates.length) ds.duplicates = duplicates;
   for (const p of parts) {
     ds.items.push(p.item);
+    if (skip.has(p.item.id)) continue;
     for (const a of p.accounts) if (!seen.acc.has(a.id)) (seen.acc.add(a.id), ds.accounts.push(a));
     for (const c of p.cards) if (!seen.card.has(c.id)) (seen.card.add(c.id), ds.cards.push(c));
     for (const b of p.bills) if (!seen.bill.has(b.id)) (seen.bill.add(b.id), ds.bills.push(b));
@@ -355,6 +446,7 @@ export const FinancialDataService = {
   normalizeTransaction,
   normalizeBill,
   normalizeInvestment,
+  normalizeInvestmentMovements,
   normalizeBundle,
   mergeItemData,
   investmentClassOf,

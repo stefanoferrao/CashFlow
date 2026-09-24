@@ -3,7 +3,13 @@
  */
 export const APP_CONFIG = {
   name: 'CashFlow',
-  version: '1.0.0',
+  version: '1.2.0',
+
+  /** Notas de Atualização: Releases públicas do repositório (consultadas só ao abrir a tela). */
+  releases: {
+    pageUrl: 'https://github.com/stefanoferrao/CashFlow/releases',
+    apiUrl: 'https://api.github.com/repos/stefanoferrao/CashFlow/releases?per_page=30',
+  },
 
   pluggy: {
     /** Endpoint oficial da API (docs.pluggy.ai → Basic Concepts). */

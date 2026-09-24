@@ -11,6 +11,7 @@ import { store } from '../state/store';
 import { formatDate, formatMoney, formatMonthKey, formatShortDate } from '../utils/format';
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+import { openBillsPanel } from './billsOverview';
 import { analytics, canvasFor, chartFrame, commonHandlers, dataTable, hasAnyData, logoOf, noDataState, onDataChange, tableToggle } from './shared';
 
 export function mount(ctx: PageContext): () => void {
@@ -37,23 +38,48 @@ export function mount(ctx: PageContext): () => void {
     const closed = s.dataset.bills.filter((b) => b.cardId === card.id).sort((x, y) => y.dueDate.localeCompare(x.dueDate));
     const future = summary ? calculateFutureCardCharges(summary, 6) : [];
     const cur = card.currency;
+    // Faturas seguintes somando todos os cartões (na moeda base): o que já se sabe de cada mês.
+    const upcomingByMonth = new Map<string, number>();
+    for (const b of a.bills) {
+      if (b.card.currency !== 'BRL') continue;
+      for (const f of calculateFutureCardCharges(b, 3)) upcomingByMonth.set(f.month, (upcomingByMonth.get(f.month) ?? 0) + f.total);
+    }
+    const allUpcoming = [...upcomingByMonth.entries()].sort((x, y) => x[0].localeCompare(y[0])).slice(0, 3).map(([month, total]) => ({ month, total: r2(total) }));
 
     render(
       root,
       html`<div class="page">
         <div class="page-head">
           <p class="page-head__intro">A fatura aberta não é fornecida pela Pluggy: ela é calculada a partir das transações do ciclo atual. Faturas fechadas vêm da instituição.</p>
-          ${cards.length > 1
-            ? segmented(
+        </div>
+
+        <section class="card" aria-labelledby="bills-all">
+          <div class="card__head">
+            <div class="card__title card__title--lg" id="bills-all">${icon('receipt')}Próxima fatura · todos os cartões</div>
+            ${infoTip('Soma das faturas abertas de todos os cartões. Escolha um cartão na lista para ver a previsão detalhada, os lançamentos e as próximas faturas dele.')}
+          </div>
+          ${openBillsPanel(a.openBills, { today: a.today, selectAction: cards.length > 1 ? 'select-card' : undefined, selected: card.id, showPace: true, title: 'Total a pagar nas próximas faturas' })}
+          ${allUpcoming.length
+            ? html`<div class="stack-sm">
+                <div class="card__title">Faturas seguintes · todos os cartões <span class="muted" style="font-weight:500">(parcelas e lançamentos já conhecidos)</span></div>
+                <div class="chips-row">${allUpcoming.map((u) => html`<span class="chip-stat"><span class="chip-stat__label">${formatMonthKey(u.month)}</span><strong class="money">${formatMoney(u.total)}</strong></span>`)}</div>
+              </div>`
+            : ''}
+        </section>
+
+        ${cards.length > 1
+          ? html`<div class="row-between wrap" style="gap:12px">
+              <h3 class="section-title">Detalhe do cartão</h3>
+              ${segmented(
                 'select-card',
                 cards.map((c) => {
-                  return { value: c.id, label: html`<span class="inst-name">${instLogo(logoOf(c), 'xs')}<span class="inst-name__text">${c.name}</span></span>` };
+                  return { value: c.id, label: html`<span class="inst-name">${instLogo(logoOf(c), 'xs')}<span class="inst-name__text">${c.label ?? c.name}</span></span>` };
                 }),
                 card.id,
                 'Cartão',
-              )
-            : ''}
-        </div>
+              )}
+            </div>`
+          : ''}
 
         ${!summary || !proj
           ? html`<div class="card"><div class="stack" style="align-items:flex-start">${na('Datas de fechamento/vencimento não informadas pela instituição — não é possível montar o ciclo da fatura.')}

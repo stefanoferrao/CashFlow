@@ -6,6 +6,7 @@ import { destroyCharts, rethemeCharts, resizeCharts } from './charts/charts';
 import { html, render } from './components/dom';
 import { mountShell, type ShellHandle } from './components/shell';
 import { mountToasts } from './components/toast';
+import { installTooltips } from './components/tooltip';
 import { navigate, parseHash, ROUTES, type PageModule } from './router';
 import * as actions from './state/actions';
 import { notify } from './state/notify';
@@ -76,11 +77,13 @@ async function renderScreen(mode: AppMode): Promise<void> {
 
 export async function startApp(): Promise<void> {
   mountToasts(document.getElementById('toasts')!);
+  installTooltips();
 
   store.subscribe((s, prev) => {
     if (s.mode !== currentMode) {
       currentMode = s.mode;
       void renderScreen(s.mode);
+      if (s.mode === 'real' || s.mode === 'demo') setTimeout(() => actions.announceNewVersion(() => navigate('novidades')), 1200);
     }
     if (s.theme.resolved !== prev.theme.resolved) requestAnimationFrame(() => rethemeCharts());
     if (s.preferences.hideValues !== prev.preferences.hideValues) {

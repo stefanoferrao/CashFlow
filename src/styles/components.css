@@ -1273,52 +1273,77 @@ button.list-item:hover {
 }
 
 /* ===================== Tooltip ===================== */
-[data-tip] {
-  position: relative;
-}
-[data-tip]:hover::after,
-[data-tip]:focus-visible::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
+/* Uma única dica flutuante (src/components/tooltip.ts): position: fixed no <body>, nunca é cortada
+   por cards com overflow, pelo topo da tela ou pela faixa do modo demonstração. */
+.tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 400;
   width: max-content;
-  max-width: 260px;
-  padding: 6px 10px;
+  max-width: min(300px, calc(100vw - 16px));
+  padding: 8px 12px;
   border-radius: var(--r-sm);
   background: var(--surface-inverse);
   color: var(--text-inverse);
   font-size: var(--fs-xs);
   font-weight: 500;
-  line-height: 1.4;
+  line-height: 1.45;
   white-space: normal;
+  overflow-wrap: anywhere;
   text-align: left;
-  z-index: 60;
   pointer-events: none;
-  animation: fade-in var(--t-fast) var(--ease);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.tooltip[data-open='true'] {
+  opacity: 1;
+}
+.tooltip::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  transform: rotate(45deg);
+}
+.tooltip[data-side='top']::after {
+  bottom: -4px;
+  left: calc(var(--arrow, 50%) - 4px);
+}
+.tooltip[data-side='bottom']::after {
+  top: -4px;
+  left: calc(var(--arrow, 50%) - 4px);
+}
+.tooltip[data-side='right']::after {
+  left: -4px;
+  top: calc(var(--arrow, 50%) - 4px);
 }
 .info-tip {
   display: inline-grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
+  margin: -2px;
   border: 0;
   padding: 0;
   border-radius: 50%;
   background: transparent;
   color: var(--text-3);
   cursor: help;
+  vertical-align: middle;
+  flex: none;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.info-tip:hover,
+.info-tip:focus-visible {
+  color: var(--text);
+  background: var(--surface-2);
 }
 .info-tip svg {
-  width: 14px;
-  height: 14px;
-}
-.info-tip[data-tip]:hover::after,
-.info-tip[data-tip]:focus-visible::after {
-  left: auto;
-  right: -8px;
-  transform: none;
+  width: 15px;
+  height: 15px;
 }
 
 /* ===================== Cartão de crédito (visual) ===================== */

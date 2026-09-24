@@ -12,6 +12,8 @@ export interface Notification {
   action?: { label: string; run: () => void };
   /** Não some sozinho (até o usuário agir ou fechar). */
   sticky?: boolean;
+  /** Tempo na tela (ms) quando não é fixo. */
+  durationMs?: number;
 }
 
 type Listener = (n: Notification) => void;
@@ -22,9 +24,9 @@ export function notify(kind: NotifyKind, title: string, message?: string): void 
   for (const l of listeners) l(n);
 }
 
-/** Aviso com botão de ação (fica na tela até o usuário responder). */
-export function notifyAction(kind: NotifyKind, title: string, message: string, action: { label: string; run: () => void }): void {
-  const n: Notification = { kind, title, message, action, sticky: true };
+/** Aviso com botão de ação (fica na tela até o usuário responder, ou por `durationMs`). */
+export function notifyAction(kind: NotifyKind, title: string, message: string, action: { label: string; run: () => void }, opts: { durationMs?: number } = {}): void {
+  const n: Notification = opts.durationMs ? { kind, title, message, action, durationMs: opts.durationMs } : { kind, title, message, action, sticky: true };
   for (const l of listeners) l(n);
 }
 

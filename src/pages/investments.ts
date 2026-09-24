@@ -4,13 +4,14 @@
  * Sem recomendações de investimento.
  */
 import { doughnutChart, lineChart, mountChart } from '../charts/charts';
-import { animateNumbers, delegate, html, render } from '../components/dom';
+import { animateNumbers, delegate, html, render, type SafeHtml } from '../components/dom';
 import { icon } from '../components/icons';
-import { figureValue, infoTip, money, na } from '../components/ui';
+import { delta, figureValue, infoTip, kv, money, na } from '../components/ui';
 import { INVESTMENT_CLASS_LABEL, type NormalizedInvestment } from '../models/finance';
+import type { InvestmentBasisSource } from '../services/financialCalculator';
 import type { PageContext } from '../router';
 import { store } from '../state/store';
-import { formatDate, formatMoney, formatNumber, formatPercent, formatShortDate } from '../utils/format';
+import { formatDate, formatMoney, formatNumber, formatPercent, formatShortDate, formatSignedPercent } from '../utils/format';
 import { CLASS_COLOR, analytics, canvasFor, chartFrame, commonHandlers, dataTable, hasAnyData, instLabel, noDataState, onDataChange, tableToggle } from './shared';
 
 const SUBTYPE_LABEL: Record<string, string> = {
@@ -50,9 +51,14 @@ function rateText(i: NormalizedInvestment): string {
   return '—';
 }
 
-function returnOf(i: NormalizedInvestment): number | null {
-  if (i.profit !== null && i.originalValue !== null && i.originalValue > 0) return i.profit / i.originalValue;
-  return null;
+const SOURCE_LABEL: Record<InvestmentBasisSource, { short: string; long: string }> = {
+  movements: { short: 'movimentações', long: 'Calculado pelas movimentações do produto (aplicações e resgates desde a primeira aplicação)' },
+  original: { short: 'valor aplicado', long: 'Valor aplicado informado pela instituição × valor atual' },
+  profit: { short: 'lucro informado', long: 'Lucro informado pela instituição' },
+};
+
+function signedMoney(v: number): SafeHtml {
+  return html`<span class="money ${v < 0 ? 'neg' : v > 0 ? 'pos' : ''}">${v > 0 ? '+' : v < 0 ? '−' : ''}${formatMoney(Math.abs(v))}</span>`;
 }
 
 export function mount(ctx: PageContext): () => void {
@@ -67,7 +73,7 @@ export function mount(ctx: PageContext): () => void {
     const a = analytics();
     const invs = s.dataset.investments.filter((i) => i.status !== 'TOTAL_WITHDRAWAL').sort((x, y) => y.value - x.value);
     const br = a.investmentBreakdown;
-    const ret = a.investmentReturn;
+    const perf = a.investmentPerformance;
     const byInst = new Map<string, number>();
     const itemOfInst = new Map<string, string>();
     for (const i of invs) {
@@ -87,11 +93,27 @@ export function mount(ctx: PageContext): () => void {
           ? html`<div class="card">${na('Nenhum investimento informado pelas instituições conectadas')}</div>`
           : html`
         <div class="kpi-grid">
-          <div class="card"><div class="figure"><span class="figure__label">Patrimônio investido ${infoTip('Soma do valor líquido (após impostos e taxas) informado pela instituição.')}</span>${figureValue(a.totalInvestments.base)}</div></div>
-          <div class="card"><div class="figure"><span class="figure__label">Rentabilidade acumulada ${infoTip('Lucro informado ÷ valor aplicado originalmente, somente dos produtos em que a instituição informa ambos.')}</span>
-            ${ret ? html`<div class="figure__value figure__value--md ${ret.rate >= 0 ? 'pos' : 'neg'}">${ret.rate >= 0 ? '+' : '−'}${formatPercent(Math.abs(ret.rate), true)}</div><div class="figure__meta"><span><span class="money">${formatMoney(ret.profit)}</span> sobre <span class="money">${formatMoney(ret.original)}</span> · cobre ${formatPercent(ret.coverage)} da carteira</span></div>` : na()}
+          <div class="card"><div class="figure"><span class="figure__label">Patrimônio investido ${infoTip('Soma do valor líquido (após impostos e taxas) informado pela instituição.')}</span>${figureValue(a.totalInvestments.base, 'md')}</div></div>
+          <div class="card kpi--accent"><div class="figure"><span class="figure__label">Rendimento acumulado ${infoTip('Rendimento = valor atual (bruto) + o que já foi resgatado − o total aplicado. Calculado produto a produto, só onde o valor aplicado é conhecido: pelas movimentações do produto ou pelo valor aplicado informado pela instituição. Produtos sem essa informação ficam fora da conta (não viram zero).')}</span>
+            ${perf.productsCovered && perf.rate !== null
+              ? html`<div class="figure__value figure__value--md ${perf.profit >= 0 ? 'pos' : 'neg'}">${signedMoney(perf.profit)}</div>
+                <div class="figure__meta">${delta(perf.rate)}<span>sobre <span class="money">${formatMoney(perf.applied)}</span> aplicados</span></div>`
+              : html`${na('Valor aplicado não informado pelas instituições')}`}
           </div></div>
-          <div class="card"><div class="figure"><span class="figure__label">Produtos</span><div class="figure__value figure__value--md">${invs.length}</div><div class="figure__meta">${byInst.size} instituição(ões)</div></div></div>
+          <div class="card"><div class="figure"><span class="figure__label">Aplicado × valor atual ${infoTip('Nos produtos com base de cálculo: total aplicado, o que já voltou para você (resgates, juros, amortizações) e o valor atual bruto. Líquido = rendimento − impostos estimados pela instituição (IR/IOF).')}</span>
+            ${perf.productsCovered
+              ? html`<div class="kv-list kv-list--tight">
+                  ${kv('Aplicado', money(perf.applied))}
+                  ${perf.withdrawn > 0 ? kv('Resgatado', money(perf.withdrawn)) : ''}
+                  ${kv('Valor atual', money(perf.current))}
+                  ${kv('Rendimento líquido', signedMoney(perf.profitNet))}
+                </div>`
+              : html`<div class="figure__value figure__value--sm muted">—</div>`}
+          </div></div>
+          <div class="card"><div class="figure"><span class="figure__label">Cobertura do cálculo ${infoTip('Parte da carteira (em valor) cujo rendimento pôde ser calculado com dados confiáveis.')}</span>
+            <div class="figure__value figure__value--md">${formatPercent(perf.coverage)}</div>
+            <div class="figure__meta"><span>${perf.productsCovered} de ${perf.productsTotal} produtos · ${byInst.size} instituição(ões)</span></div>
+          </div></div>
         </div>
         ${others.length ? html`<div class="callout callout--info">${icon('info')}<div>Investimentos em outras moedas (não somados): ${others.map(([c, v]) => formatMoney(v, c)).join(' · ')}.</div></div>` : ''}
 
@@ -139,27 +161,49 @@ export function mount(ctx: PageContext): () => void {
         </div>
 
         <section class="card">
+          <div class="card__head">
+            <div class="stack-sm"><div class="card__title card__title--lg">Como o rendimento é calculado</div>
+            <span class="muted" style="font-size:13px">Rendimento = valor atual (bruto) + resgates − total aplicado. Líquido = rendimento − impostos que a instituição estima sobre a posição atual (IR/IOF).</span></div>
+          </div>
+          <div class="basis-grid">
+            <div class="basis"><span class="basis__n">${perf.bySource.movements}</span><span><strong>Pelas movimentações</strong><br /><span class="muted">Aplicações e resgates do próprio produto, com o histórico conferido desde a primeira aplicação (quantidade ou data da aplicação).</span></span></div>
+            <div class="basis"><span class="basis__n">${perf.bySource.original}</span><span><strong>Pelo valor aplicado</strong><br /><span class="muted">Valor aplicado informado pela instituição comparado ao valor atual.</span></span></div>
+            <div class="basis"><span class="basis__n">${perf.bySource.profit}</span><span><strong>Pelo lucro informado</strong><br /><span class="muted">Quando a instituição informa só o lucro acumulado.</span></span></div>
+            <div class="basis ${perf.uncovered.length ? 'basis--warn' : ''}"><span class="basis__n">${perf.uncovered.length}</span><span><strong>Sem base confiável</strong><br /><span class="muted">Ficam fora do rendimento (nunca contam como zero).</span></span></div>
+          </div>
+          ${perf.informed12m ? html`<p class="field__hint">Rentabilidade dos últimos 12 meses informada pelas instituições (fundos): <strong>${formatPercent(perf.informed12m.rate, true)}</strong> em média, cobrindo ${formatPercent(perf.informed12m.coverage)} da carteira.</p>` : ''}
+          ${perf.uncovered.length
+            ? html`<details class="details"><summary>Produtos sem base de cálculo (${perf.uncovered.length})</summary>
+                <ul class="plain-list">${perf.uncovered.map((u) => html`<li><strong>${u.name}</strong> · <span class="money">${formatMoney(u.value)}</span> <span class="muted">— ${u.reason}</span></li>`)}</ul>
+              </details>`
+            : ''}
+        </section>
+
+        <section class="card">
           <div class="card__title card__title--lg">Produtos</div>
           ${dataTable({
             caption: 'Produtos de investimento',
-            headers: ['Produto', 'Classe', 'Instituição', 'Taxa/indexador', 'Vencimento', 'Rentab. informada', 'Valor bruto', 'Valor líquido'],
-            numericFrom: 5,
+            headers: ['Produto', 'Classe', 'Instituição', 'Taxa · vencimento', 'Aplicado', 'Valor atual (bruto)', 'Rendimento', 'Valor líquido'],
+            numericFrom: 4,
             rows: invs.map((i) => {
-              const r = returnOf(i);
+              const p = perf.perProduct[i.id];
+              const miss = perf.uncovered.find((u) => u.id === i.id);
               const r12 = i.lastTwelveMonthsRate;
               return [
                 html`<strong>${i.name}</strong>`,
                 html`${INVESTMENT_CLASS_LABEL[i.investmentClass]}<br /><span class="muted" style="font-size:12px">${i.subtype ? SUBTYPE_LABEL[i.subtype] ?? i.subtype : i.type}</span>`,
                 instLabel(i.itemId, i.institution),
-                rateText(i),
-                i.dueDate ? formatDate(i.dueDate) : '—',
-                r !== null ? html`<span class="${r >= 0 ? 'pos' : 'neg'}">${formatPercent(r, true)}</span>` : r12 !== null ? html`${formatPercent(r12, true)} <span class="muted" style="font-size:11px">12m</span>` : html`<span class="muted" title="Dados não disponíveis pela instituição">—</span>`,
-                money(i.grossValue, { currency: i.currency }),
+                html`${rateText(i)}${i.dueDate ? html`<br /><span class="muted" style="font-size:12px">vence ${formatDate(i.dueDate)}</span>` : ''}${r12 !== null ? html`<br /><span class="muted" style="font-size:12px">12m: ${formatPercent(r12, true)} (informado)</span>` : ''}`,
+                p ? html`${money(p.applied, { currency: i.currency })}${p.withdrawn > 0 ? html`<br /><span class="muted" style="font-size:12px">resgatado ${formatMoney(p.withdrawn)}</span>` : ''}` : html`<span class="muted" data-tip="${miss?.reason ?? 'Dados não disponíveis pela instituição'}">—</span>`,
+                money(p ? p.current : i.grossValue ?? i.value, { currency: i.currency }),
+                p
+                  ? html`${signedMoney(p.profit)}<br /><span class="${p.profit >= 0 ? 'pos' : 'neg'}" style="font-size:12px">${p.rate !== null ? formatSignedPercent(p.rate) : ''}</span> <span class="tag-source" data-tip="${SOURCE_LABEL[p.source].long}">${SOURCE_LABEL[p.source].short}</span>`
+                  : html`<span class="muted" data-tip="${miss?.reason ?? 'Dados não disponíveis pela instituição'}">—</span>`,
                 money(i.value, { currency: i.currency }),
               ];
             }),
           })}
-          <p class="field__hint">“—” = dado não disponível pela instituição. Nenhum valor é estimado silenciosamente.</p>
+          <p class="field__hint">“—” = sem base confiável para o cálculo (passe o mouse ou toque para ver o motivo). Nenhum valor é estimado silenciosamente.</p>
         </section>`}
       </div>`,
     );

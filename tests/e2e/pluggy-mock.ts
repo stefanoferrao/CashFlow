@@ -32,6 +32,28 @@ export interface MockState {
   cursorCalls: number;
   requests: string[];
   itemStatus: number;
+  /** Corpos enviados a POST /connect_token. */
+  connectTokenBodies: unknown[];
+}
+
+/**
+ * Widget Pluggy Connect simulado (no lugar do script do CDN). `duplicate`: a Pluggy recusa a conexão repetida e
+ * devolve o ID da conexão existente (`ITEM_USER_ALREADY_EXISTS`), exatamente como o widget real faz.
+ */
+export async function mockConnectWidget(page: Page, behavior: 'duplicate' | 'success' | 'error'): Promise<void> {
+  const payload =
+    behavior === 'duplicate'
+      ? `o.onError && o.onError({ message: 'ITEM_USER_ALREADY_EXISTS', data: { items: ['${ITEM_ID}'] } });`
+      : behavior === 'success'
+        ? `o.onSuccess && o.onSuccess({ item: { id: '${ITEM_ID}', connector: { id: 201, name: 'Banco Mock' }, status: 'UPDATED', executionStatus: 'SUCCESS' } });`
+        : `o.onError && o.onError({ message: 'Um erro inesperado ocorreu. Por favor, tente novamente mais tarde.' });`;
+  await page.route('https://cdn.pluggy.ai/pluggy-connect/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: `window.PluggyConnect = class { constructor(o) { this.o = o; window.__connectOptions = { connectToken: o.connectToken, updateItem: o.updateItem || null }; } init() { const o = this.o; setTimeout(() => { ${payload} }, 50); } };`,
+    }),
+  );
 }
 
 /** Logo servido no lugar do CDN da Pluggy (catálogo de conectores simulado). */
@@ -46,7 +68,7 @@ const json = (route: Route, status: number, body: unknown) =>
  * camada de identidade das instituições.
  */
 export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPluggy?: boolean } = {}): Promise<MockState> {
-  const state: MockState = { authCalls: 0, cursorCalls: 0, requests: [], itemStatus: opts.itemStatus ?? 200 };
+  const state: MockState = { authCalls: 0, cursorCalls: 0, requests: [], itemStatus: opts.itemStatus ?? 200, connectTokenBodies: [] };
   const mp = !!opts.meuPluggy;
   await page.route('https://cdn.pluggy.ai/e2e-mock/**', (route) =>
     route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#820AD1"/></svg>' }),
@@ -158,6 +180,10 @@ export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPlu
       });
     }
     if (url.pathname === '/bills') return json(route, 200, { page: 1, total: 0, totalPages: 1, results: [] });
+    if (url.pathname === '/connect_token' && req.method() === 'POST') {
+      state.connectTokenBodies.push(JSON.parse(req.postData() ?? '{}'));
+      return json(route, 200, { accessToken: 'mock-connect-token' });
+    }
     if (url.pathname === '/connectors') {
       return json(route, 200, {
         page: 1,

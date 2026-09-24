@@ -277,10 +277,35 @@ export interface NormalizedInvestment {
   rate: number | null;
   rateType: string | null;
   fixedAnnualRate: number | null;
+  /** Rentabilidade do último mês informada pela instituição (fração: 0,0087 = 0,87%). */
   lastMonthRate: number | null;
+  /** Rentabilidade dos últimos 12 meses informada pela instituição (fração). */
   lastTwelveMonthsRate: number | null;
   status: string | null;
   referenceDate: DateKey | null;
+  /** Data da aplicação, quando a instituição informa. */
+  purchaseDate?: DateKey | null;
+  /** Data de emissão do título. */
+  issueDate?: DateKey | null;
+  /** Quantidade de cotas/títulos na posição. */
+  quantity?: number | null;
+  /**
+   * Movimentações do produto (GET /investments/{id}/transactions): aplicações, resgates, rendimentos pagos, impostos.
+   * null = não disponibilizadas pela instituição.
+   */
+  movements?: InvestmentMovement[] | null;
+}
+
+export type InvestmentMovementType = 'BUY' | 'SELL' | 'TAX' | 'TRANSFER' | 'INTEREST' | 'AMORTIZATION' | 'OTHER';
+
+export interface InvestmentMovement {
+  date: DateKey;
+  type: InvestmentMovementType;
+  /** in = dinheiro entrou no investimento; out = saiu (resgate, juros/amortização pagos, imposto). null = não informado. */
+  direction: 'in' | 'out' | null;
+  /** Valor bruto da operação (sempre positivo). */
+  amount: number;
+  quantity: number | null;
 }
 
 export interface NetWorthSnapshot {
@@ -304,6 +329,17 @@ export interface FinancialDataset {
   fetchedAt: string | null;
   /** Avisos de dados parciais/indisponíveis por item. */
   warnings: string[];
+  /**
+   * Conexões repetidas (mesmo conector e mesmas contas/cartões de outra conexão mais recente).
+   * Os dados delas ficam FORA do dataset para não somar o mesmo dinheiro duas vezes.
+   */
+  duplicates?: DuplicateItem[];
+}
+
+export interface DuplicateItem {
+  itemId: string;
+  /** Conexão mantida (mais recente). */
+  duplicateOf: string;
 }
 
 export const emptyDataset = (source: DataSource = 'pluggy'): FinancialDataset => ({

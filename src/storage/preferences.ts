@@ -20,6 +20,8 @@ export interface UserPreferences {
   /** Inclui recorrências estimadas nas projeções. */
   includeEstimates: boolean;
   debug: boolean;
+  /** Última versão do app cujas novidades o usuário já viu (aviso "CashFlow atualizado"). */
+  lastSeenVersion: string | null;
 }
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
@@ -31,6 +33,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   hideValues: false,
   includeEstimates: true,
   debug: false,
+  lastSeenVersion: null,
 };
 
 const THEME_KEY = 'cashflow.theme';

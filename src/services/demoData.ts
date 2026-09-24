@@ -260,13 +260,36 @@ export function buildDemoDataset(today: DateKey = todayKey()): FinancialDataset 
     ...p,
   });
   const investments: NormalizedInvestment[] = [
-    inv({ id: 'demo-inv-cdb', name: 'CDB Horizonte 110% CDI', type: 'FIXED_INCOME', subtype: 'CDB', investmentClass: 'renda_fixa', value: 48320.55, grossValue: 49410.1, originalValue: 42000, profit: 6320.55, dueDate: addMonths(today, 30), issuer: 'Banco Horizonte', rate: 110, rateType: 'CDI' }),
-    inv({ id: 'demo-inv-tesouro', name: 'Tesouro IPCA+ 2035', type: 'FIXED_INCOME', subtype: 'TREASURY', investmentClass: 'renda_fixa', value: 26410.2, grossValue: 26880.0, originalValue: 23500, profit: 2910.2, dueDate: '2035-05-15', issuer: 'Tesouro Nacional', rateType: 'IPCA', fixedAnnualRate: 6.12 }),
-    inv({ id: 'demo-inv-lci', name: 'LCI Aurora 95% CDI', type: 'FIXED_INCOME', subtype: 'LCI', investmentClass: 'renda_fixa', value: 15230.9, originalValue: 14000, profit: 1230.9, dueDate: addMonths(today, 11), issuer: 'Banco Aurora', rate: 95, rateType: 'CDI', itemId: 'demo-item-aurora', institution: INST.aurora.name }),
+    // Rendimento pelas movimentações (quantidade conferida): 2 aplicações e 1 resgate.
+    inv({
+      id: 'demo-inv-cdb', name: 'CDB Horizonte 110% CDI', type: 'FIXED_INCOME', subtype: 'CDB', investmentClass: 'renda_fixa',
+      value: 48320.55, grossValue: 49410.1, originalValue: null, profit: null, dueDate: addMonths(today, 30), issuer: 'Banco Horizonte', rate: 110, rateType: 'CDI',
+      quantity: 42, purchaseDate: addMonths(today, -26),
+      movements: [
+        { date: addMonths(today, -26), type: 'BUY', direction: 'in', amount: 30000, quantity: 30 },
+        { date: addMonths(today, -14), type: 'BUY', direction: 'in', amount: 15000, quantity: 15 },
+        { date: addMonths(today, -5), type: 'SELL', direction: 'out', amount: 3600, quantity: 3 },
+        { date: addMonths(today, -5), type: 'TAX', direction: 'out', amount: 96.5, quantity: null },
+      ],
+    }),
+    // Rendimento pelas movimentações (histórico desde a data da aplicação).
+    inv({
+      id: 'demo-inv-tesouro', name: 'Tesouro IPCA+ 2035', type: 'FIXED_INCOME', subtype: 'TREASURY', investmentClass: 'renda_fixa',
+      value: 26410.2, grossValue: 26880.0, originalValue: null, profit: null, dueDate: '2035-05-15', issuer: 'Tesouro Nacional', rateType: 'IPCA', fixedAnnualRate: 6.12,
+      purchaseDate: addMonths(today, -20),
+      movements: [
+        { date: addMonths(today, -20), type: 'BUY', direction: 'in', amount: 12000, quantity: null },
+        { date: addMonths(today, -9), type: 'BUY', direction: 'in', amount: 11500, quantity: null },
+      ],
+    }),
+    // Valor aplicado informado pela instituição.
+    inv({ id: 'demo-inv-lci', name: 'LCI Aurora 95% CDI', type: 'FIXED_INCOME', subtype: 'LCI', investmentClass: 'renda_fixa', value: 15230.9, originalValue: 14000, profit: 0, dueDate: addMonths(today, 11), issuer: 'Banco Aurora', rate: 95, rateType: 'CDI', itemId: 'demo-item-aurora', institution: INST.aurora.name }),
     inv({ id: 'demo-inv-multi', name: 'Horizonte Multiestratégia FIM', type: 'MUTUAL_FUND', subtype: 'MULTIMARKET_FUND', investmentClass: 'fundos', value: 18950.7, grossValue: 19420.3, originalValue: 17000, profit: 1950.7, lastMonthRate: 0.0087, lastTwelveMonthsRate: 0.1182 }),
-    inv({ id: 'demo-inv-fii', name: 'Fundo Imobiliário Renda Urbana', type: 'EQUITY', subtype: 'REAL_ESTATE_FUND', investmentClass: 'fundos', value: 6310.0, originalValue: 6000, profit: 310 }),
+    // Só o lucro informado.
+    inv({ id: 'demo-inv-fii', name: 'Fundo Imobiliário Renda Urbana', type: 'EQUITY', subtype: 'REAL_ESTATE_FUND', investmentClass: 'fundos', value: 6310.0, originalValue: null, profit: 310 }),
     inv({ id: 'demo-inv-acoes', name: 'Carteira de Ações Dividendos', type: 'EQUITY', subtype: 'STOCK', investmentClass: 'acoes', value: 12480.35, originalValue: 11200, profit: 1280.35 }),
-    inv({ id: 'demo-inv-etf', name: 'ETF Índice Brasil Amplo', type: 'ETF', subtype: 'ETF', investmentClass: 'etfs', value: 8120.8, originalValue: 7600, profit: 520.8 }),
+    // A instituição repete o saldo como "valor aplicado": sem base confiável (fica fora, não vira zero).
+    inv({ id: 'demo-inv-etf', name: 'ETF Índice Brasil Amplo', type: 'ETF', subtype: 'ETF', investmentClass: 'etfs', value: 8120.8, originalValue: 8120.8, profit: 0, purchaseDate: addMonths(today, -8) }),
     inv({ id: 'demo-inv-prev', name: 'VGBL Horizonte Previdência', type: 'SECURITY', subtype: 'RETIREMENT', investmentClass: 'previdencia', value: 15600.0 }),
   ];
 

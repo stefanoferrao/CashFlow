@@ -69,9 +69,20 @@ Para os testes E2E, instale o navegador do Playwright uma vez: `npx playwright i
 
 Existem dois caminhos, e o app suporta ambos:
 
-**a) Pluggy Connect (widget oficial)** — em *Contas → Adicionar instituição → Abrir Pluggy Connect*.
+**a) Pluggy Connect (widget oficial, recomendado)** — em *Contas → Adicionar instituição → Abrir Pluggy Connect*.
 O app cria um `connect_token` e abre o widget oficial (`cdn.pluggy.ai/pluggy-connect/v2.8.2`), carregado só nesse momento.
-Ao concluir, o Item é salvo localmente e sincronizado.
+No widget, escolha o banco — ou **Meu Pluggy**, para trazer os bancos já conectados em meu.pluggy.ai. Ao concluir, o Item é
+salvo localmente e sincronizado.
+
+- **Conta já conectada:** o token pede à Pluggy para evitar duplicatas (`avoidDuplicates`). Quando a conta já tem uma conexão na
+  sua aplicação, a Pluggy recusa criar outra e devolve o ID da existente (no widget aparece "Um erro inesperado ocorreu") —
+  o CashFlow lê esse ID e **reaproveita a conexão existente** automaticamente, sem precisar do Item ID.
+- **Identificador do usuário:** o token leva um `clientUserId` fixo (resumo SHA-256 do Client ID, igual em qualquer aparelho),
+  para a Pluggy agrupar as conexões e reconhecer repetições.
+- **Autorização no banco pelo celular:** em https, o token informa o endereço do próprio app como `oauthRedirectUri`
+  (a Pluggy não aceita http/localhost).
+- **Conexões repetidas antigas** (mesmo conector e mesmas contas/cartões) são detectadas, ficam fora dos totais e podem ser
+  removidas em *Contas → Remover repetidas*.
 
 **b) Meu Pluggy (uso pessoal gratuito)** — recomendado para pessoa física:
 
@@ -145,7 +156,8 @@ Camadas:
 2. `POST /auth` com `{ clientId, clientSecret, nonExpiring: false }` → `{ apiKey }` (JWT válido por **2 horas**).
 3. O `apiKey` fica **só em memória** e é enviado no header `X-API-KEY`. É renovado 5 minutos antes do `exp`.
 4. Se a Pluggy responder `403 API_KEY_MISSING_OR_INVALID` (verificado: é 403, não 401), o cliente renova o `apiKey` **uma vez** e repete a chamada.
-5. Para abrir o widget: `POST /connect_token` → `accessToken` (30 min) → `new PluggyConnect({ connectToken, ... }).init()`.
+5. Para abrir o widget: `POST /connect_token` (`clientUserId`, `avoidDuplicates`, `oauthRedirectUri` em https; `itemId` para reconectar)
+   → `accessToken` (30 min) → `new PluggyConnect({ connectToken, ... }).init()`. Erro `ITEM_USER_ALREADY_EXISTS` → reaproveita o Item informado.
 6. O Secret só existe decifrado dentro de `useCredentials()`, durante a chamada a `/auth`.
 
 ---
@@ -179,7 +191,7 @@ Banco IndexedDB `cashflow` (versão 1):
 | `categories` | Árvore de categorias da Pluggy, suas regras/ajustes, lançamentos previstos, personalizações (nomes, cores, logos escolhidos ou enviados, apelidos, dias de fechamento/vencimento) e o catálogo de conectores da Pluggy (7 dias) | **Sim** |
 | `snapshots` | Registros diários de patrimônio (histórico local) | **Sim** |
 | `dashboard_layout` | Posição/tamanho/visibilidade dos cards | Não (só layout) |
-| `user_preferences` | Preferências de exibição, cache, bloqueio | Não (sem dados sensíveis) |
+| `user_preferences` | Preferências de exibição, cache, bloqueio, última versão vista e a lista pública de Notas de Atualização (6 h) | Não (sem dados sensíveis) |
 
 Fora do IndexedDB, só o tema fica em `localStorage` (`cashflow.theme`), para ser aplicado antes da primeira pintura e evitar flash.
 O service worker do PWA mantém no Cache Storage **apenas arquivos do app** (HTML, JS, CSS, fontes, ícones) e logos de instituições —
@@ -255,6 +267,10 @@ Todos em `src/services/financialCalculator.ts` (funções puras, com testes):
 | `calculateMonthlyIncome` / `Expenses` | Regime de competência, só `income`/`expense` |
 | `calculateSavingsRate` | (receitas − despesas) / receitas; indefinida sem receitas |
 | `calculateCashFlow` | Entradas, saídas e saldo líquido por dia/semana/mês/ano |
+| `resolveCashFlowPeriod` | Períodos do Fluxo de Caixa: mês, trimestre, ano (calendário, com navegação) e todo o período; escolhe o agrupamento (dia/semana/mês) |
+| `calculateOpenBillsOverview` | Soma das faturas abertas de todos os cartões + valor, participação e vencimento de cada um; fechadas a pagar (informadas pela instituição) à parte |
+| `calculateInvestmentPerformance` | Rendimento = valor atual bruto + resgatado − aplicado, produto a produto, só com base confiável (ver abaixo) |
+| `calculateNetWorthHistory` | Saldo das contas reconstruído pelas transações + patrimônio registrado nos dias sincronizados (sem estimar investimentos) |
 | `calculateAssetAllocation` | Contas + investimentos por classe; cada real aparece **uma** vez |
 
 **Ciclo da fatura:** a prioridade das datas é (1) os dias de fechamento e vencimento que **você** definiu (no cartão ou em
@@ -275,28 +291,44 @@ Se a instituição informa para a fatura um total maior que a soma das transaç�
 parcelas futuras), **recorrências detectadas** no histórico (sempre rotuladas como estimativa e desligáveis em
 *Configurações → Aparência → Incluir estimativas*) e lançamentos previstos que você cadastra.
 
+**Rendimento dos investimentos** (por produto, na primeira base disponível):
+1. **Movimentações do produto** (`GET /investments/{id}/transactions`): aplicações e resgates, usadas só se o histórico estiver
+   completo — quantidade de cotas conferida com a posição, ou primeira aplicação na data da aplicação/emissão;
+2. **Valor aplicado informado** (`amountOriginal`) × valor atual bruto (`amount`). Se o "aplicado" for igual ao atual numa
+   aplicação antiga, a instituição apenas repetiu o saldo: sem base;
+3. **Lucro informado** (`amountProfit`, líquido): aplicado = líquido − lucro.
+Rendimento líquido = rendimento bruto − impostos que a instituição estima sobre a posição atual (`amount − balance`). Produtos sem
+base ficam **fora** da conta e são listados com o motivo — nunca viram "rendimento zero". As taxas de rentabilidade da Pluggy
+(`lastMonthRate`, `lastTwelveMonthsRate`) vêm em percentual e são convertidas para fração na normalização.
+
 **Moedas:** valores em moeda diferente do real **nunca** são somados nem convertidos; o app avisa que ficaram de fora.
 
 **Histórico:** a Pluggy não fornece série histórica de saldo ou patrimônio. O app (a) grava um registro local de patrimônio por dia
-após cada sincronização e (b) reconstrói o saldo bancário diário a partir das transações.
+após cada sincronização e (b) reconstrói o saldo bancário diário a partir das transações — exato a partir da primeira transação
+disponível de cada instituição (contas sem nenhuma transação ficam de fora). Investimentos e dívidas de cartão **não** são
+reconstruídos: a Pluggy só informa o valor atual deles, e estimar o passado mostraria um histórico que não aconteceu.
 
 ---
 
 ## Funcionalidades
 
-- **Dashboard** modular (GridStack): mover, redimensionar, ocultar, mostrar, fixar e restaurar padrão; layout salvo localmente.
+- **Dashboard** modular (GridStack): em *Personalizar*, cada card tem uma barra para arrastar, botões de largura (1/4, 1/3, 1/2,
+  2/3, inteira) e altura, alça de redimensionar sempre visível, ocultar e fixar; no celular, setas para reordenar. Layout salvo localmente.
   Cards: Patrimônio líquido, Saldo em contas, Investimentos por classe, Receitas × despesas, Para onde está indo meu dinheiro?,
-  Fatura atual, Limites dos cartões, Receitas, Despesas, Próximos gastos, Saldo projetado e Insights.
+  Fatura atual (soma de todos os cartões, com a parte de cada um), Limites dos cartões, Receitas, Despesas, Próximos gastos,
+  Saldo projetado e Insights.
 - **Contas** — saldos por instituição, histórico reconstruído, status de sincronização de cada Item, atualizar/reconectar/remover.
-- **Cartões** — limites, % usado, melhor dia de compra, fechamento, vencimento, fatura atual e seguinte; dias de fechamento e vencimento definidos por você; logo próprio de cada cartão.
-- **Faturas** — previsão (lançado + futuro + parcelas previstas), "Se você continuar gastando neste ritmo…", evolução diária, próximas faturas e fechadas.
+- **Cartões** — **próxima fatura somando todos os cartões** e a parte de cada um; limites, % usado, melhor dia de compra, fechamento, vencimento, fatura atual e seguinte; dias de fechamento e vencimento definidos por você; logo próprio de cada cartão.
+- **Faturas** — próxima fatura de todos os cartões (lista que também escolhe o cartão) e faturas seguintes somadas; por cartão: previsão (lançado + futuro + parcelas previstas), "Se você continuar gastando neste ritmo…", evolução diária, próximas faturas e fechadas.
 - **Transações** — busca instantânea (sem acento), filtros por período, conta, cartão, instituição, categoria, tipo e valor, ordenação e paginação; recategorização e regras.
-- **Investimentos** — por classe, instituição e produto; "Dados não disponíveis pela instituição" quando falta informação (nada é estimado).
-- **Fluxo de Caixa** — dia/semana/mês/ano, taxa de poupança, projeção 7–90 dias, lançamentos previstos.
-- **Análises** — indicadores e insights baseados apenas nos seus dados, cada um com a base de cálculo; sem recomendações de investimento.
+- **Investimentos** — rendimento acumulado (aplicado × valor atual, bruto e líquido), cobertura do cálculo e a base de cada produto; por classe, instituição e produto; produtos sem base listados com o motivo (nada é estimado).
+- **Fluxo de Caixa** — Mês, Trimestre, Ano e Todo o período (com navegação ‹ ›), taxa de poupança, projeção 7–90 dias, lançamentos previstos.
+- **Análises** — indicadores e insights baseados apenas nos seus dados, cada um com a base de cálculo; patrimônio ao longo do tempo (saldo reconstruído + registros); sem recomendações de investimento.
+- **Notas de Atualização** — histórico de versões lido das Releases do GitHub (só quando a tela é aberta), com a versão em uso destacada e as notas embutidas quando não há internet. Após uma atualização, o app avisa uma vez.
 - **Configurações** — Conta, Pluggy, Cartões, Segurança, Aparência, Aplicativo, Dashboard, Dados locais e Sobre. Tela de **Privacidade e segurança**.
 - Tema Claro/Escuro/Sistema; ocultar valores; modo demonstração; menu inferior no mobile; responsivo de 320 a 1920 px.
 - Todo gráfico tem alternativa em tabela; cores validadas para daltonismo; nenhuma informação transmitida só por cor.
+- Dicas (ícone "?" e botões) flutuam sobre a página: nunca são cortadas por cards ou pela borda da tela; no toque, abrem com um toque.
 
 ### Identidade das instituições
 
@@ -350,7 +382,9 @@ Chamadas à API da Pluggy, ao Pluggy Connect e ao proxy local passam direto pela
 | Sem atualização em segundo plano | Sem servidor, nada roda com o app fechado | A Pluggy/Meu Pluggy sincroniza os Items do lado dela (ex.: a cada 24 h) |
 | Fatura aberta não vem da API | `/bills` costuma trazer só faturas fechadas (no Open Finance, só Inter PF e Itaú Cartões trazem faturas) | Calculada pelas transações do ciclo + parcelas previstas; se a instituição já lista a fatura atual, ela é reconhecida como aberta e o maior valor prevalece |
 | Parcelas futuras | Instituições do Open Finance costumam enviar só a parcela do mês | As parcelas restantes são projetadas a partir da última conhecida (rotuladas como "prevista") |
-| Histórico de patrimônio | A API não fornece | Registros locais diários + reconstrução por transações |
+| Histórico de patrimônio | A API não fornece | Registros locais diários + saldo das contas reconstruído por transações; investimentos e dívidas não são estimados |
+| Rendimento dos investimentos | Muitas instituições não informam o valor aplicado (ou repetem o saldo) | Movimentações do produto com histórico conferido; sem base confiável, o produto fica fora da conta |
+| Conexões repetidas | Cada consentimento cria um Item novo na Pluggy | `avoidDuplicates` + `clientUserId` fixo; reaproveita o Item existente; repetidas antigas ficam fora dos totais |
 | Histórico de transações | A Pluggy fornece até ~12 meses | Busca 365 dias para trás e lançamentos futuros até 400 dias |
 | Listar Items automaticamente | `GET /v2/items` é opt-in | Guarda IDs do Connect e aceita IDs colados |
 | Items do Meu Pluggy | Não aceitam `PATCH /items/{id}` | Mensagem explicando que a atualização é feita pelo Meu Pluggy |
@@ -373,7 +407,8 @@ Chamadas à API da Pluggy, ao Pluggy Connect e ao proxy local passam direto pela
 ├── docs/AUDITORIA-PLUGGY.md # Auditoria da documentação oficial
 ├── src/
 │   ├── main.ts / app.ts / router.ts   # Entrada, telas por modo, rotas com lazy-loading
-│   ├── config/app.config.ts           # Timeouts, limites, iterações, TTLs
+│   ├── config/app.config.ts           # Versão, timeouts, limites, iterações, TTLs, endereço das Releases
+│   ├── config/releaseNotes.ts         # Notas desta versão (embutidas; usadas sem internet)
 │   ├── pluggy/      # client, errors, sync, connect (widget), types (payloads oficiais)
 │   ├── security/    # crypto (Web Crypto), vault (cofre), redact (logs sem segredos)
 │   ├── storage/     # db (IndexedDB), repository (registros cifrados), preferences
@@ -381,12 +416,12 @@ Chamadas à API da Pluggy, ao Pluggy Connect e ao proxy local passam direto pela
 │   │                # recurrence, insights, transactionQuery, demoData
 │   ├── state/       # store (estado central), actions (orquestração), notify
 │   ├── models/      # tipos normalizados e categorias
-│   ├── components/  # dom (template seguro), ui, shell, modal, toast, icons
+│   ├── components/  # dom (template seguro), ui, shell, modal, toast, tooltip (dicas flutuantes), icons
 │   ├── charts/      # Chart.js com tema lido das variáveis CSS
-│   ├── pages/       # dashboard, contas, cartões, faturas, transações, investimentos,
-│   │                # fluxo, análises, configurações, privacidade, onboarding, bloqueio
+│   ├── pages/       # dashboard, contas, cartões, faturas (+ billsOverview), transações, investimentos,
+│   │                # fluxo, análises, configurações, privacidade, notas de atualização (releases), onboarding, bloqueio
 │   ├── styles/      # tokens.css (cores/tema), base, layout, components, pages
-│   └── utils/       # format (Intl pt-BR), dates, async (debounce, fila, memo)
+│   └── utils/       # format (Intl pt-BR), dates, async (debounce, fila, memo), markdown (seguro, notas de atualização)
 └── tests/
     ├── unit/        # cálculos, normalização, cripto, cliente Pluggy, utilitários
     └── e2e/         # Playwright com a API da Pluggy simulada
@@ -421,7 +456,7 @@ npm test          # unitários
 npm run build && npm run test:e2e
 ```
 
-**Unitários (118):** todos os cálculos do `FinancialCalculator` (saldo, investimentos, patrimônio, dívida, utilização, ciclo de
+**Unitários (157):** todos os cálculos do `FinancialCalculator` (saldo, investimentos, patrimônio, dívida, utilização, ciclo de
 fatura, previsão no ritmo, saldo projetado, receitas/despesas, poupança, fluxo, alocação, histórico reconstruído), normalização
 (sinais de cartão, `kind`, parcelas, PII removida), Web Crypto (AES-GCM, AAD, senha errada, chave não extraível), cliente Pluggy
 (`/auth`, reuso e renovação do `apiKey`, cursor `next` sem recodificar, paginação, CORS × offline), formatação pt-BR, XSS,
@@ -429,9 +464,14 @@ redação de logs, recorrências, consulta de transações e identidade das inst
 de corretora com vários emissores, nomes de razão social e do titular, catálogo de conectores, aplicação das personalizações,
 ciclo de fatura com dias definidos pelo usuário), faturas (fatura aberta listada pela instituição — cenário do Inter —, atribuição
 por `billId`, calibração do `billForecastDate`, parcelas previstas, valor informado pela instituição, sem dupla contagem no saldo
-projetado) e biblioteca de logos (busca por nome/COMPE/produto, URLs aceitas, logo do produto do cartão).
+projetado) e biblioteca de logos (busca por nome/COMPE/produto, URLs aceitas, logo do produto do cartão). Versão 1.2.0: faturas
+somadas por cartão (fechadas a pagar à parte, outras moedas fora), rendimento dos investimentos (movimentações com quantidade
+conferida, histórico incompleto recusado, "aplicado" igual ao saldo recusado, lucro informado, taxas em percentual), períodos do
+fluxo de caixa, patrimônio ao longo do tempo (sem inventar investimentos), conexões repetidas, erro de duplicidade do Pluggy
+Connect, `connect_token` (`clientUserId`, `avoidDuplicates`, `oauthRedirectUri` só em https), versões e releases, Markdown
+seguro, posição das dicas e tamanhos dos cards.
 
-**E2E (25, API da Pluggy simulada com os formatos oficiais):** tema claro/escuro/sistema e persistência; dashboard demo;
+**E2E (37, API da Pluggy e GitHub simulados com os formatos oficiais):** tema claro/escuro/sistema e persistência; dashboard demo;
 personalização persistida e restaurar padrão; tabela alternativa dos gráficos; **sem overflow horizontal em
 320/375/390/414/768/1024/1280/1440/1920 px em todas as páginas**; menu "Mais" no mobile; fluxo de conexão completo (formato inválido,
 credencial recusada, sucesso, paginação por cursor, descrição maliciosa renderizada como texto); **nenhum segredo em texto puro**
@@ -440,7 +480,11 @@ detecção de CORS; "Apagar todos os dados locais"; conexão do Meu Pluggy ident
 titular nunca exibido, dias de fechamento/vencimento definidos pelo usuário, personalização aplicada em cartões e transações,
 guardada cifrada e mantida após bloquear/desbloquear; logo próprio do cartão escolhido na galeria; galeria de logos com busca por
 código COMPE; renomear instituição e conta no modo demonstração; **PWA** (manifesto instalável, service worker ativo, app abre sem
-internet e nenhuma resposta da Pluggy fica em cache).
+internet e nenhuma resposta da Pluggy fica em cache). Versão 1.2.0: Pluggy Connect com conta já conectada reaproveita o Item
+existente (e o `connect_token` leva `clientUserId`/`avoidDuplicates` sem expor o Client ID), erro genérico do widget, faturas
+somadas em Dashboard/Cartões/Faturas, botões de tamanho e barra de mover no Personalizar (e setas no celular), dicas inteiras
+dentro da tela (mouse e toque), períodos do Fluxo de Caixa, rendimento dos investimentos, patrimônio ao longo do tempo e Notas
+de Atualização (lista do GitHub sem executar HTML das notas; sem internet, notas embutidas).
 
 Nenhum teste usa credenciais reais.
 

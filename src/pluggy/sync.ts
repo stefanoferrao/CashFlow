@@ -7,7 +7,7 @@ import { addDays, todayKey } from '../utils/dates';
 import { sleep } from '../utils/async';
 import type { PluggyClient } from './client';
 import { PluggyError, toPluggyError } from './errors';
-import type { PluggyBill, PluggyItem, PluggyTransaction, RawItemBundle } from './types';
+import type { PluggyBill, PluggyInvestmentTransaction, PluggyItem, PluggyTransaction, RawItemBundle } from './types';
 
 export type StepReporter = (message: string) => void;
 
@@ -72,7 +72,31 @@ export async function fetchItemBundle(client: PluggyClient, itemId: string, repo
     warnings.push(`${institution}: ${PRODUCT_LABEL.investments} indisponíveis (${err.title}).`);
   }
 
-  return { item, accounts, transactionsByAccount, billsByAccount, investments, warnings };
+  // Movimentações de cada investimento (aplicações e resgates): base do cálculo "quanto apliquei × quanto vale hoje".
+  const investmentTransactions: Record<string, PluggyInvestmentTransaction[]> = {};
+  const active = investments.filter((i) => i.status !== 'TOTAL_WITHDRAWAL').slice(0, 80);
+  if (active.length) {
+    report?.(`${institution}: movimentações dos investimentos`);
+    let unavailable = false;
+    let ok = 0;
+    let failed = 0;
+    for (const inv of active) {
+      if (unavailable) break;
+      try {
+        investmentTransactions[inv.id] = await client.getInvestmentTransactions(inv.id);
+        ok++;
+      } catch (e) {
+        const err = toPluggyError(e);
+        if (!isSoftFailure(err)) throw err;
+        failed++;
+        // Recurso não disponível para esta conexão/plano: não insiste nos demais produtos.
+        if (err.kind === 'forbidden' || (ok === 0 && failed >= 3)) unavailable = true;
+      }
+    }
+    if (unavailable) warnings.push(`${institution}: movimentações dos investimentos não disponibilizadas (o rendimento usa os valores informados pela instituição).`);
+  }
+
+  return { item, accounts, transactionsByAccount, billsByAccount, investments, investmentTransactions, warnings };
 }
 
 const IN_PROGRESS = /IN_PROGRESS$|^CREATING$|^CREATED$|^MERGING$/;

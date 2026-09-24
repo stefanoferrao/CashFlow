@@ -176,6 +176,26 @@ export interface PluggyInvestment {
   lastTwelveMonthsRate: number | null;
   status: 'ACTIVE' | 'PENDING' | 'TOTAL_WITHDRAWAL' | null;
   institution: { name: string | null; number: string | null } | null;
+  /** Data da aplicação (quando a instituição informa). */
+  purchaseDate?: string | null;
+  taxes?: number | null;
+  taxes2?: number | null;
+}
+
+/** Movimentação de um investimento (GET /investments/{id}/transactions). */
+export interface PluggyInvestmentTransaction {
+  id?: string;
+  type: 'BUY' | 'SELL' | 'TAX' | 'TRANSFER' | 'INTEREST' | 'AMORTIZATION' | string;
+  /** CREDIT = entrou no investimento; DEBIT = saiu (quando a instituição informa). */
+  movementType?: 'CREDIT' | 'DEBIT' | string | null;
+  date: string | null;
+  tradeDate?: string | null;
+  quantity?: number | null;
+  value?: number | null;
+  /** Valor bruto da operação. */
+  amount: number | null;
+  netAmount?: number | null;
+  description?: string | null;
 }
 
 export interface PluggyCategory {
@@ -205,5 +225,7 @@ export interface RawItemBundle {
   transactionsByAccount: Record<string, PluggyTransaction[]>;
   billsByAccount: Record<string, PluggyBill[]>;
   investments: PluggyInvestment[];
+  /** Movimentações por investimento (ausente = não consultadas/indisponíveis). */
+  investmentTransactions?: Record<string, PluggyInvestmentTransaction[]>;
   warnings: string[];
 }

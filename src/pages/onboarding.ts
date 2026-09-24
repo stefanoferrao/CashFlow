@@ -130,7 +130,7 @@ export function mountOnboarding(host: HTMLElement): () => void {
       <div class="callout callout--good">${icon('check')}<div><strong>Conexão com a Pluggy funcionando.</strong> Credenciais ${s.connection.vaultMode === 'session' ? 'mantidas só nesta sessão' : 'salvas e cifradas neste navegador'}.</div></div>
       <div class="option-card">
         <div class="row">${icon('plug')}<strong>Pluggy Connect</strong></div>
-        <p class="muted">Widget oficial da Pluggy para conectar um banco.</p>
+        <p class="muted">Widget oficial da Pluggy para conectar um banco (ou o Meu Pluggy). Se a conta já estiver conectada, a conexão existente é reaproveitada — nenhuma conexão nova é criada.</p>
         <label class="check"><input type="checkbox" data-action="sandbox" ${s.preferences.includeSandbox ? 'checked' : ''} /> Incluir conectores de teste (sandbox)</label>
         <button type="button" class="btn btn--primary" data-action="connect" ${busy ? 'disabled' : ''}>${icon('plus')}Abrir Pluggy Connect</button>
       </div>

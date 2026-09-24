@@ -1,11 +1,12 @@
 /**
- * Fluxo de Caixa — entradas, saídas, saldo líquido e taxa de poupança por dia/semana/mês/ano;
+ * Fluxo de Caixa — entradas, saídas, saldo líquido e taxa de poupança por período (mês, trimestre, ano, todo o período);
  * gastos por categoria; saldo projetado (7/15/30/60/90 dias) e lançamentos previstos manuais.
  */
 import { barChart, lineChart, mountChart } from '../charts/charts';
 import { animateNumbers, delegate, html, render } from '../components/dom';
 import { icon } from '../components/icons';
 import { badge, categoryIcon, categoryLabel, figureValue, infoTip, money, na, segmented } from '../components/ui';
+import type { NormalizedTransaction } from '../models/finance';
 import type { PageContext } from '../router';
 import {
   buildProjectionEvents,
@@ -14,26 +15,31 @@ import {
   calculatePeriodTotals,
   calculateProjectedBalance,
   calculateSavingsRate,
+  resolveCashFlowPeriod,
+  type CashFlowPeriod,
+  type CashFlowPeriodKind,
   type Granularity,
 } from '../services/financialCalculator';
 import * as actions from '../state/actions';
 import { store } from '../state/store';
-import { addDays, addMonths, monthStart, todayKey, weekStart, type DateKey } from '../utils/dates';
-import { formatDate, formatMoney, formatMonthKeyShort, formatPercent, formatShortDate } from '../utils/format';
+import { addDays, todayKey, type DateKey } from '../utils/dates';
+import { formatDate, formatMoney, formatMonthKey, formatMonthKeyShort, formatPercent, formatShortDate } from '../utils/format';
 import { analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, noDataState, onDataChange, tableToggle } from './shared';
 
-const GRAN_LABEL: Record<Granularity, string> = { day: 'Dia', week: 'Semana', month: 'Mês', year: 'Ano' };
+const GRAN_LABEL: Record<Granularity, string> = { day: 'dia', week: 'semana', month: 'mês', year: 'ano' };
+const PERIOD_LABEL: Record<CashFlowPeriodKind, string> = { month: 'Mês', quarter: 'Trimestre', year: 'Ano', all: 'Todo o período' };
+const Q_MONTHS = ['jan–mar', 'abr–jun', 'jul–set', 'out–dez'];
 
-function rangeFor(g: Granularity, today: DateKey): { start: DateKey; end: DateKey; label: string } {
-  switch (g) {
-    case 'day':
-      return { start: addDays(today, -29), end: today, label: 'últimos 30 dias' };
-    case 'week':
-      return { start: weekStart(addDays(today, -7 * 11)), end: today, label: 'últimas 12 semanas' };
+function periodTitle(p: CashFlowPeriod): string {
+  switch (p.kind) {
     case 'month':
-      return { start: monthStart(addMonths(today, -11)), end: today, label: 'últimos 12 meses' };
+      return formatMonthKey(p.start.slice(0, 7));
+    case 'quarter':
+      return `${p.quarter}º trimestre de ${p.year} (${Q_MONTHS[p.quarter - 1]})`;
     case 'year':
-      return { start: `${Number(today.slice(0, 4)) - 2}-01-01`, end: today, label: 'últimos 3 anos (histórico disponível)' };
+      return String(p.year);
+    case 'all':
+      return `Todo o período · ${formatMonthKeyShort(p.start.slice(0, 7))} a ${formatMonthKeyShort(p.end.slice(0, 7))}`;
   }
 }
 
@@ -43,9 +49,17 @@ function bucketLabel(start: DateKey, g: Granularity): string {
   return formatShortDate(start);
 }
 
+/** Data do lançamento mais antigo que entra no fluxo (limite do histórico disponível). */
+function firstFlowDate(txs: NormalizedTransaction[]): DateKey | null {
+  let min: DateKey | null = null;
+  for (const t of txs) if (t.status === 'posted' && (t.kind === 'income' || t.kind === 'expense') && (!min || t.date < min)) min = t.date;
+  return min;
+}
+
 export function mount(ctx: PageContext): () => void {
   const root = ctx.root;
-  let gran: Granularity = 'month';
+  let kind: CashFlowPeriodKind = 'month';
+  let offset = 0;
   let horizon = 30;
 
   const paint = () => {
@@ -55,8 +69,16 @@ export function mount(ctx: PageContext): () => void {
       return;
     }
     const a = analytics();
-    const range = rangeFor(gran, a.today);
+    const dataStart = firstFlowDate(a.transactions);
+    const range = resolveCashFlowPeriod(kind, offset, a.today, dataStart);
+    const gran = range.granularity;
+    const title = periodTitle(range);
+    const partialHistory = !!dataStart && range.start < dataStart && kind !== 'all';
     const cf = calculateCashFlow(a.transactions, { granularity: gran, start: range.start, end: range.end });
+    // Por dia, a linha mostra o resultado ACUMULADO no período (mais legível que o saldo de cada dia).
+    const lineLabel = gran === 'day' ? 'Resultado acumulado' : 'Saldo líquido';
+    let acc = 0;
+    const lineData = gran === 'day' ? cf.map((b) => (acc = Math.round((acc + b.net) * 100) / 100)) : cf.map((b) => b.net);
     const totals = calculatePeriodTotals(a.transactions, range.start, range.end, false);
     const rate = calculateSavingsRate(totals.income, totals.expenses);
     const cats = calculateCategoryBreakdown(a.transactions, range.start, range.end);
@@ -77,32 +99,43 @@ export function mount(ctx: PageContext): () => void {
       html`<div class="page">
         <div class="page-head">
           <p class="page-head__intro">Receitas e despesas em regime de competência: compras no cartão contam na data da compra; pagamento de fatura, transferências próprias e aplicações não entram.</p>
-          ${segmented('gran', (Object.keys(GRAN_LABEL) as Granularity[]).map((g) => ({ value: g, label: GRAN_LABEL[g] })), gran, 'Agrupar por')}
+          ${segmented('period', (Object.keys(PERIOD_LABEL) as CashFlowPeriodKind[]).map((k) => ({ value: k, label: PERIOD_LABEL[k] })), kind, 'Período')}
         </div>
 
+        <div class="period-nav" role="group" aria-label="Navegar entre períodos">
+          ${kind !== 'all' ? html`<button type="button" class="icon-btn icon-btn--outline" data-action="period-prev" aria-label="${PERIOD_LABEL[kind]} anterior" data-tip="${PERIOD_LABEL[kind]} anterior" ${range.canPrev ? '' : 'disabled'}>${icon('chevronLeft')}</button>` : ''}
+          <div class="period-nav__label">
+            <strong>${title}</strong>
+            <span class="muted">${formatDate(range.start)} a ${formatDate(range.end)}${range.ongoing && kind !== 'all' ? ' · em andamento' : ''} · agrupado por ${GRAN_LABEL[gran]}</span>
+          </div>
+          ${kind !== 'all' ? html`<button type="button" class="icon-btn icon-btn--outline" data-action="period-next" aria-label="Próximo ${PERIOD_LABEL[kind].toLowerCase()}" data-tip="Próximo ${PERIOD_LABEL[kind].toLowerCase()}" ${range.canNext ? '' : 'disabled'}>${icon('chevronRight')}</button>` : ''}
+          ${offset !== 0 ? html`<button type="button" class="btn btn--ghost btn--sm" data-action="period-today">Voltar ao atual</button>` : ''}
+        </div>
+        ${partialHistory ? html`<div class="callout callout--info">${icon('info')}<div>Os lançamentos disponíveis começam em ${formatDate(dataStart)} (a Pluggy fornece cerca de 12 meses de histórico). Antes disso, o período aparece sem movimento.</div></div>` : ''}
+
         <div class="kpi-grid">
-          <div class="card"><div class="figure"><span class="figure__label">Entradas · ${range.label}</span>${figureValue(totals.income, 'md')}</div></div>
+          <div class="card"><div class="figure"><span class="figure__label">Entradas</span>${figureValue(totals.income, 'md')}</div></div>
           <div class="card"><div class="figure"><span class="figure__label">Saídas</span>${figureValue(totals.expenses, 'md')}</div></div>
           <div class="card"><div class="figure"><span class="figure__label">Saldo líquido</span><div class="figure__value figure__value--md ${totals.net < 0 ? 'neg' : ''}"><span class="money">${formatMoney(totals.net)}</span></div></div></div>
           <div class="card"><div class="figure"><span class="figure__label">Taxa de poupança ${infoTip('(Entradas − saídas) ÷ entradas no período.')}</span><div class="figure__value figure__value--md">${formatPercent(rate)}</div></div></div>
         </div>
 
         <section class="card">
-          <div class="card__head"><div class="card__title card__title--lg">Entradas, saídas e saldo líquido por ${GRAN_LABEL[gran].toLowerCase()}</div>${tableToggle('cf-main')}</div>
+          <div class="card__head"><div class="card__title card__title--lg">Entradas, saídas e saldo líquido · ${title}</div>${tableToggle('cf-main')}</div>
           <div class="chart-legend">
             <span class="chart-legend__item"><span class="chart-legend__key" style="--key:var(--series-1)"></span>Entradas</span>
             <span class="chart-legend__item"><span class="chart-legend__key" style="--key:var(--series-2)"></span>Saídas</span>
-            <span class="chart-legend__item"><span class="chart-legend__key is-line" style="--key:var(--series-3)"></span>Saldo líquido</span>
+            <span class="chart-legend__item"><span class="chart-legend__key is-line" style="--key:var(--series-3)"></span>${lineLabel}</span>
           </div>
-          ${chartFrame('cf-main', 300, `Entradas e saídas por ${GRAN_LABEL[gran].toLowerCase()}`, {
+          ${chartFrame('cf-main', 300, `Entradas e saídas por ${GRAN_LABEL[gran]} — ${title}`, {
             caption: 'Fluxo de caixa',
             headers: ['Período', 'Entradas', 'Saídas', 'Saldo líquido', 'Taxa de poupança'],
-            rows: cf.map((b) => [bucketLabel(b.start, gran), money(b.income), money(b.expenses), money(b.net, { signed: true, tone: true }), formatPercent(calculateSavingsRate(b.income, b.expenses))]),
+            rows: cf.map((b) => [bucketLabel(b.start < range.start ? range.start : b.start, gran), money(b.income), money(b.expenses), money(b.net, { signed: true, tone: true }), formatPercent(calculateSavingsRate(b.income, b.expenses))]),
           })}
         </section>
 
         <section class="card">
-          <div class="card__head"><div class="card__title card__title--lg">Gastos por categoria · ${range.label}</div>${cats.length ? tableToggle('cf-cats') : ''}</div>
+          <div class="card__head"><div class="card__title card__title--lg">Gastos por categoria · ${title}</div>${cats.length ? tableToggle('cf-cats') : ''}</div>
           ${cats.length
             ? chartFrame('cf-cats', Math.max(160, cats.length * 38), 'Gastos por categoria', {
                 caption: 'Gastos por categoria',
@@ -185,11 +218,11 @@ export function mount(ctx: PageContext): () => void {
       void mountChart(
         main,
         barChart(
-          cf.map((b) => bucketLabel(b.start, gran)),
+          cf.map((b) => bucketLabel(b.start < range.start ? range.start : b.start, gran)),
           [
             { label: 'Entradas', data: cf.map((b) => b.income), colorIndex: 1 },
             { label: 'Saídas', data: cf.map((b) => b.expenses), colorIndex: 2 },
-            { label: 'Saldo líquido', data: cf.map((b) => b.net), colorIndex: 3, asLine: true },
+            { label: lineLabel, data: lineData, colorIndex: 3, asLine: true },
           ],
           { maxTicksX: gran === 'day' ? 10 : 12 },
         ),
@@ -203,8 +236,21 @@ export function mount(ctx: PageContext): () => void {
 
   const off = delegate(root, 'click', {
     ...commonHandlers,
-    gran: (el) => {
-      gran = el.dataset.value as Granularity;
+    period: (el) => {
+      kind = el.dataset.value as CashFlowPeriodKind;
+      offset = 0;
+      paint();
+    },
+    'period-prev': () => {
+      offset -= 1;
+      paint();
+    },
+    'period-next': () => {
+      offset = Math.min(0, offset + 1);
+      paint();
+    },
+    'period-today': () => {
+      offset = 0;
       paint();
     },
     horizon: (el) => {

@@ -22,7 +22,7 @@ import {
   normalizeLabels,
 } from '../models/finance';
 import { PluggyClient } from '../pluggy/client';
-import { openPluggyConnect } from '../pluggy/connect';
+import { oauthRedirectUriFor, openPluggyConnect } from '../pluggy/connect';
 import { FRIENDLY_MESSAGES, PluggyError, toPluggyError } from '../pluggy/errors';
 import { fetchItemBundle, waitForItemReady } from '../pluggy/sync';
 import type { PluggyCategory } from '../pluggy/types';
@@ -48,7 +48,7 @@ import {
 import { secureRepo } from '../storage/repository';
 import { uid } from '../utils/async';
 import { todayKey } from '../utils/dates';
-import { notify } from './notify';
+import { notify, notifyAction } from './notify';
 import { type AppState, store } from './store';
 
 // ------------------------------------------------------------------ cliente Pluggy
@@ -103,6 +103,11 @@ export async function boot(): Promise<void> {
   const preferences = await loadPreferences();
   setDebugLogging(preferences.debug);
   store.set({ preferences });
+  capturePendingConnect();
+  if (preferences.mode === null && preferences.lastSeenVersion === null) {
+    newInstall = true;
+    void updatePreferences({ lastSeenVersion: APP_CONFIG.version });
+  }
 
   if (!isWebCryptoAvailable()) {
     store.set({ mode: 'onboarding' });
@@ -143,6 +148,30 @@ export async function reloadPreferences(): Promise<void> {
   const preferences = await loadPreferences();
   setDebugLogging(preferences.debug);
   store.set({ preferences });
+}
+
+// ------------------------------------------------------------------ novidades da versão
+
+let versionAnnounced = false;
+/** Primeira abertura do app neste navegador (sem preferências salvas): não há "atualização" a anunciar. */
+let newInstall = false;
+
+/**
+ * Depois de uma atualização do app, avisa uma única vez: "CashFlow atualizado para a versão X — Ver novidades".
+ * Na primeira instalação não há aviso (não há o que comparar).
+ */
+export function announceNewVersion(open: () => void): void {
+  if (versionAnnounced) return;
+  versionAnnounced = true;
+  const prefs = store.state.preferences;
+  if (prefs.lastSeenVersion === APP_CONFIG.version || newInstall) return;
+  void updatePreferences({ lastSeenVersion: APP_CONFIG.version });
+  notifyAction('info', `CashFlow atualizado para a versão ${APP_CONFIG.version}`, 'Veja o que mudou nas Notas de Atualização.', { label: 'Ver novidades', run: open }, { durationMs: 15000 });
+}
+
+/** Chamado ao abrir as Notas de Atualização. */
+export async function markVersionSeen(): Promise<void> {
+  if (store.state.preferences.lastSeenVersion !== APP_CONFIG.version) await updatePreferences({ lastSeenVersion: APP_CONFIG.version });
 }
 
 // ------------------------------------------------------------------ modo demonstração
@@ -222,6 +251,49 @@ export async function configureCredentials(setup: CredentialSetup, opts: { enter
 export function enterApp(): void {
   store.set({ mode: 'real' });
   if (store.state.itemIds.length && store.state.online) void syncAll();
+  void resumePendingConnect();
+}
+
+// ------------------------------------------------------------------ retorno da autorização no banco (celular)
+
+const PENDING_KEY = 'cashflow.pendingItem';
+
+/**
+ * No celular, depois de autorizar no app do banco, a Pluggy devolve o usuário ao endereço do CashFlow
+ * (`oauthRedirectUri`). Se o endereço trouxer o ID da conexão, ele é guardado (só nesta aba) para ser
+ * registrado assim que o app for desbloqueado — e a URL é limpa.
+ */
+function capturePendingConnect(): void {
+  try {
+    const q = new URLSearchParams(location.search);
+    const raw = q.get('itemId') ?? q.get('item_id') ?? q.get('item') ?? '';
+    if (!raw && ![...q.keys()].some((k) => /^(itemid|item_id|item|status|error|code|state)$/i.test(k))) return;
+    if (ITEM_ID.test(raw)) sessionStorage.setItem(PENDING_KEY, raw.toLowerCase());
+    history.replaceState(null, '', `${location.pathname}${location.hash}`);
+  } catch {
+    /* sem sessionStorage/history: ignora */
+  }
+}
+
+async function resumePendingConnect(): Promise<void> {
+  let id: string | null = null;
+  try {
+    id = sessionStorage.getItem(PENDING_KEY);
+    if (id) sessionStorage.removeItem(PENDING_KEY);
+  } catch {
+    return;
+  }
+  if (!id || store.state.mode !== 'real' || !store.state.connection.hasCredentials) return;
+  if (store.state.itemIds.includes(id)) return;
+  try {
+    await getClient().getItem(id);
+    await registerItem(id);
+    await syncAll({ onlyItemId: id });
+    notify('success', 'Conexão concluída', 'A autorização no banco foi concluída e a conexão foi adicionada ao CashFlow.');
+  } catch (e) {
+    const err = toPluggyError(e);
+    debugLog('connect', 'retorno da autorização não registrado', err.kind);
+  }
 }
 
 export async function unlockVault(passphrase: string): Promise<void> {
@@ -242,6 +314,7 @@ export async function unlockVault(passphrase: string): Promise<void> {
   const stale = await loadCache();
   if (hasCredentials && store.state.itemIds.length && stale && store.state.online) void syncAll();
   else if (hasCredentials) void ensureConnectors();
+  if (hasCredentials) void resumePendingConnect();
 }
 
 export function lockApp(reason: 'manual' | 'inactivity' = 'manual'): void {
@@ -524,18 +597,95 @@ export async function discoverItems(): Promise<number> {
   return added;
 }
 
+/**
+ * Identificador estável do usuário para a Pluggy (`clientUserId`): derivado do Client ID por SHA-256 — o mesmo valor
+ * em qualquer aparelho, sem revelar o Client ID. A Pluggy agrupa as conexões por ele e o usa para barrar duplicatas.
+ */
+async function pluggyUserId(): Promise<string | undefined> {
+  try {
+    const clientId = await vault.useCredentials(async (c) => c.clientId);
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`cashflow|${clientId.trim().toLowerCase()}`));
+    return `cashflow-${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 24)}`;
+  } catch {
+    return undefined;
+  }
+}
+
+export function isMeuPluggyItem(itemId: string): boolean {
+  const it = store.state.baseDataset.items.find((i) => i.id === itemId) ?? store.state.dataset.items.find((i) => i.id === itemId);
+  return !!it && it.institution.connectorId === APP_CONFIG.pluggy.meuPluggyConnectorId;
+}
+
+/**
+ * A Pluggy recusou criar uma conexão repetida (mesmas credenciais) e informou as que já existem:
+ * em vez de mostrar erro, o CashFlow passa a usar a conexão existente — sem criar outra.
+ */
+async function adoptExistingItems(ids: string[]): Promise<boolean> {
+  const already = ids.find((id) => store.state.itemIds.includes(id));
+  if (already) {
+    notify('info', 'Esta conta já está conectada', 'A Pluggy identificou que essas credenciais já têm uma conexão, e ela já está no CashFlow. Os dados dela serão atualizados agora.');
+    await syncAll({ onlyItemId: already });
+    return true;
+  }
+  const c = getClient();
+  setSync({ status: 'syncing', progress: 'Recuperando a conexão que já existe na Pluggy' });
+  const found = (await Promise.allSettled(ids.slice(0, 10).map((id) => c.getItem(id))))
+    .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof c.getItem>>> => r.status === 'fulfilled')
+    .map((r) => r.value);
+  setSync({ status: 'idle', progress: null });
+  if (!found.length) {
+    notify('error', 'Conexão repetida', 'A Pluggy informou que essa conta já está conectada, mas a conexão existente não pôde ser lida. Use "Tenho um Item ID" com o ID mostrado no Dashboard da Pluggy.');
+    return false;
+  }
+  // Prefere a conexão saudável e mais recente.
+  const score = (it: (typeof found)[number]) => (it.status === 'UPDATED' ? 2 : it.status === 'UPDATING' ? 1 : 0);
+  found.sort((a, b) => score(b) - score(a) || (b.lastUpdatedAt ?? b.updatedAt ?? '').localeCompare(a.lastUpdatedAt ?? a.updatedAt ?? ''));
+  const chosen = found[0]!;
+  await registerItem(chosen.id);
+  await syncAll({ onlyItemId: chosen.id });
+  notify(
+    'success',
+    'Conexão existente reaproveitada',
+    `${chosen.connector?.name ?? 'Instituição'}: a Pluggy já tinha esta conexão e ela foi adicionada ao CashFlow — nenhuma conexão nova foi criada.${found.length > 1 ? ` Há ${found.length} conexões com as mesmas credenciais na sua aplicação; as demais podem ser excluídas no Dashboard da Pluggy.` : ''}`,
+  );
+  return true;
+}
+
 /** "Adicionar instituição": abre o Pluggy Connect com um connect token criado no navegador. */
 export async function connectInstitution(updateItemId?: string): Promise<boolean> {
+  if (updateItemId && isMeuPluggyItem(updateItemId)) {
+    notify(
+      'info',
+      'Conexão do Meu Pluggy',
+      'Conexões do Meu Pluggy são reconectadas e atualizadas no próprio Meu Pluggy (meu.pluggy.ai). O CashFlow recebe as mudanças automaticamente — use "Atualizar dados".',
+    );
+    return false;
+  }
   const c = getClient();
   setSync({ status: 'syncing', progress: 'Preparando o Pluggy Connect' });
+  const clientUserId = await pluggyUserId();
+  const oauthRedirectUri = oauthRedirectUriFor(location);
+  const tokenOpts = { ...(updateItemId ? { itemId: updateItemId } : {}), ...(clientUserId ? { clientUserId } : {}) };
   let token: string;
   try {
-    token = await c.createConnectToken(updateItemId);
+    token = await c.createConnectToken({ ...tokenOpts, ...(oauthRedirectUri ? { oauthRedirectUri } : {}) });
   } catch (e) {
-    const err = toPluggyError(e);
-    setSync({ status: 'idle', progress: null });
-    notify('error', err.title, err.message);
-    return false;
+    let err = toPluggyError(e);
+    let recovered: string | null = null;
+    // Algumas aplicações recusam um endereço de retorno não cadastrado: tenta de novo sem ele.
+    if (oauthRedirectUri && err.kind === 'bad_request') {
+      try {
+        recovered = await c.createConnectToken(tokenOpts);
+      } catch (e2) {
+        err = toPluggyError(e2);
+      }
+    }
+    if (!recovered) {
+      setSync({ status: 'idle', progress: null });
+      notify('error', err.title, err.message);
+      return false;
+    }
+    token = recovered;
   }
   setSync({ status: 'idle', progress: null });
   let result;
@@ -552,7 +702,20 @@ export async function connectInstitution(updateItemId?: string): Promise<boolean
   }
   if (result.status === 'closed') return false;
   if (result.status === 'error' || !result.item) {
-    notify('error', 'Conexão não concluída', result.message ?? 'O Pluggy Connect informou um erro. Tente novamente.');
+    debugLog('connect', 'erro do widget', result.error?.code ?? '', result.error?.message ?? '');
+    if (result.error?.duplicate && result.error.existingItemIds.length) return adoptExistingItems(result.error.existingItemIds);
+    if (result.item) {
+      const n = normalizeItem(result.item);
+      notify('error', `Conexão não concluída — ${n.institution.name}`, n.message ?? 'A instituição recusou o acesso. Confira os dados e tente novamente.');
+      return false;
+    }
+    notify(
+      'error',
+      'Conexão não concluída',
+      result.error?.duplicate
+        ? 'A Pluggy informou que esta conta já está conectada à sua aplicação. Use "Tenho um Item ID" com o ID mostrado no Dashboard da Pluggy (ou no Meu Pluggy).'
+        : 'O Pluggy Connect informou um erro. Tente novamente em instantes; se persistir, confira no Dashboard da Pluggy se o conector está habilitado para a sua aplicação.',
+    );
     return false;
   }
   const itemId = result.item.id;
@@ -568,8 +731,44 @@ export async function connectInstitution(updateItemId?: string): Promise<boolean
   }
   setSync({ status: 'idle', progress: null });
   await syncAll({ onlyItemId: itemId });
-  notify('success', 'Instituição conectada', result.item.connector?.name);
+  notify('success', updateItemId ? 'Instituição reconectada' : 'Instituição conectada', result.item.connector?.name);
+  if (!updateItemId) void offerDuplicateCleanup(itemId);
   return true;
+}
+
+/**
+ * Depois de uma conexão nova: se ela repete outra já registrada (mesmo conector e mesmas contas/cartões),
+ * oferece manter só a nova — a antiga já fica fora dos totais para não somar o mesmo dinheiro duas vezes.
+ */
+async function offerDuplicateCleanup(newItemId: string): Promise<void> {
+  const dups = (store.state.baseDataset.duplicates ?? []).filter((d) => d.duplicateOf === newItemId);
+  if (!dups.length) return;
+  const { confirmDialog } = await import('../components/modal');
+  const ok = await confirmDialog({
+    title: 'Conexão repetida',
+    message: `Esta instituição já estava conectada (${dups.length === 1 ? 'uma conexão anterior' : `${dups.length} conexões anteriores`} com as mesmas contas). A conexão antiga já foi desconsiderada nos totais. Remover a antiga deste navegador e excluí-la na Pluggy, para não acumular conexões?`,
+    confirmLabel: 'Manter só a nova',
+  });
+  if (!ok) return;
+  await removeDuplicateItems(dups.map((d) => d.itemId), true);
+}
+
+/** Remove conexões repetidas deste navegador (e, se pedido, exclui na Pluggy). */
+export async function removeDuplicateItems(itemIds: string[], alsoOnPluggy: boolean): Promise<void> {
+  let deleted = 0;
+  for (const id of itemIds) {
+    if (alsoOnPluggy && store.state.mode === 'real') {
+      try {
+        await getClient().deleteItem(id);
+        deleted++;
+      } catch (e) {
+        debugLog('items', 'não excluído na Pluggy', id, toPluggyError(e).kind);
+      }
+    }
+    await removeItemLocally(id, true);
+  }
+  await loadCache();
+  notify('success', 'Conexões repetidas removidas', alsoOnPluggy ? `${itemIds.length} removida(s) deste navegador${deleted ? ` e ${deleted} excluída(s) na Pluggy` : ''}.` : `${itemIds.length} removida(s) deste navegador.`);
 }
 
 /** Pede à Pluggy uma nova coleta na instituição (PATCH /items/{id}). */
@@ -589,7 +788,7 @@ export async function requestInstitutionRefresh(itemId: string): Promise<void> {
 }
 
 /** Remove a instituição DESTE navegador (não exclui o Item na Pluggy). */
-export async function removeItemLocally(itemId: string): Promise<void> {
+export async function removeItemLocally(itemId: string, quiet = false): Promise<void> {
   await Promise.all([
     secureRepo.delete('pluggy_items', itemId),
     secureRepo.delete('accounts', itemId),
@@ -613,6 +812,7 @@ export async function removeItemLocally(itemId: string): Promise<void> {
       productLogos: keep(cur.productLogos),
     } satisfies UserLabels);
   }
+  if (quiet) return;
   await loadCache();
   notify('success', 'Instituição removida deste navegador', 'Para revogar o acesso de fato, remova o item no Dashboard da Pluggy ou no Meu Pluggy.');
 }

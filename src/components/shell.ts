@@ -38,6 +38,7 @@ export const BOTTOM_NAV = ['dashboard', 'contas', 'cartoes', 'transacoes'];
 export const PAGE_TITLES: Record<string, string> = {
   ...Object.fromEntries(NAV.map((n) => [n.path, n.label])),
   privacidade: 'Privacidade e segurança',
+  novidades: 'Notas de Atualização',
 };
 
 function sidebar(active: string, st: AppState): SafeHtml {
@@ -63,7 +64,8 @@ function sidebar(active: string, st: AppState): SafeHtml {
       )}
     </nav>
     <div class="sidebar__footer">
-      <a class="nav__link ${active === 'privacidade' ? 'is-active' : ''}" href="#/privacidade" data-nav="privacidade">${icon('shield')}<span class="nav__label">Privacidade</span></a>
+      <a class="nav__link ${active === 'novidades' ? 'is-active' : ''}" href="#/novidades" data-nav="novidades" data-tip-rail="Notas de Atualização · v${APP_CONFIG.version}">${icon('gift')}<span class="nav__label">Novidades <span class="nav__version">v${APP_CONFIG.version}</span></span></a>
+      <a class="nav__link ${active === 'privacidade' ? 'is-active' : ''}" href="#/privacidade" data-nav="privacidade" data-tip-rail="Privacidade">${icon('shield')}<span class="nav__label">Privacidade</span></a>
       <div class="conn-pill" title="${demo ? 'Modo demonstração' : st.connection.vaultMode === 'session' ? 'Sessão sem persistência' : 'Credenciais cifradas neste navegador'}">
         <span class="inst-logo" style="width:28px;height:28px">${icon(demo ? 'sparkle' : st.connection.status === 'error' ? 'alert' : 'lock')}</span>
         <span class="conn-pill__text">
@@ -121,7 +123,7 @@ function topbar(title: string, st: AppState): SafeHtml {
         ${icon(st.preferences.hideValues ? 'eyeOff' : 'eye')}
       </button>
       <div class="menu-wrap">
-        <button type="button" class="icon-btn" data-action="menu" data-menu="theme" aria-haspopup="menu" aria-expanded="false" aria-label="Tema: ${st.theme.pref === 'system' ? 'Sistema' : st.theme.pref === 'dark' ? 'Escuro' : 'Claro'}">${icon(THEME_ICON[st.theme.pref])}</button>
+        <button type="button" class="icon-btn" data-action="menu" data-menu="theme" aria-haspopup="menu" aria-expanded="false" aria-label="Tema: ${st.theme.pref === 'system' ? 'Sistema' : st.theme.pref === 'dark' ? 'Escuro' : 'Claro'}" data-tip="Tema: ${st.theme.pref === 'system' ? 'Sistema' : st.theme.pref === 'dark' ? 'Escuro' : 'Claro'}">${icon(THEME_ICON[st.theme.pref])}</button>
         <div class="menu" role="menu" data-menu-panel="theme">
           <div class="menu__label">Tema</div>
           ${(['light', 'dark', 'system'] as ThemePref[]).map(
@@ -132,11 +134,12 @@ function topbar(title: string, st: AppState): SafeHtml {
         </div>
       </div>
       <div class="menu-wrap">
-        <button type="button" class="icon-btn icon-btn--outline" data-action="menu" data-menu="user" aria-haspopup="menu" aria-expanded="false" aria-label="Menu do usuário">${icon('user')}</button>
+        <button type="button" class="icon-btn icon-btn--outline" data-action="menu" data-menu="user" aria-haspopup="menu" aria-expanded="false" aria-label="Menu do usuário" data-tip="Menu e configurações">${icon('user')}</button>
         <div class="menu" role="menu" data-menu-panel="user">
           <div class="menu__label">${st.mode === 'demo' ? 'Modo demonstração' : 'Sua sessão'}</div>
           <a class="menu__item" role="menuitem" href="#/configuracoes">${icon('settings')}Configurações</a>
           <a class="menu__item" role="menuitem" href="#/privacidade">${icon('shield')}Privacidade e segurança</a>
+          <a class="menu__item" role="menuitem" href="#/novidades">${icon('gift')}Notas de Atualização <span class="menu__meta">v${APP_CONFIG.version}</span></a>
           ${installState() === 'available' ? html`<button type="button" class="menu__item" role="menuitem" data-action="install-app">${icon('phone')}Instalar aplicativo</button>` : ''}
           <div class="menu__sep"></div>
           ${st.mode === 'demo'
@@ -300,6 +303,7 @@ function openMoreSheet(active: string): void {
           (n) => html`<li><a class="nav__link ${n.path === active ? 'is-active' : ''}" href="#/${n.path}" data-close>${icon(n.icon)}<span>${n.label}</span></a></li>`,
         )}
         <li><a class="nav__link ${active === 'privacidade' ? 'is-active' : ''}" href="#/privacidade" data-close>${icon('shield')}<span>Privacidade e segurança</span></a></li>
+        <li><a class="nav__link ${active === 'novidades' ? 'is-active' : ''}" href="#/novidades" data-close>${icon('gift')}<span>Notas de Atualização · v${APP_CONFIG.version}</span></a></li>
       </ul>
     </nav>
     <div class="divider"></div>

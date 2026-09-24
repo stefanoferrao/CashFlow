@@ -12,6 +12,7 @@ import { calculateFutureCardCharges, cardUtilization } from '../services/financi
 import { store } from '../state/store';
 import { addDays, parseKey } from '../utils/dates';
 import { formatDate, formatMoney, formatMonthKey, formatPercent } from '../utils/format';
+import { openBillsPanel } from './billsOverview';
 import { analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, institutionOf, logoOf, noDataState, onDataChange, tableToggle } from './shared';
 
 function darken(hex: string, amount = 0.45): string {
@@ -71,12 +72,20 @@ export function mount(ctx: PageContext): () => void {
           ? html`<div class="card">${na('Nenhum cartão de crédito encontrado nas instituições conectadas')}</div>`
           : html`
           <div class="kpi-grid">
-            <div class="card"><div class="figure"><span class="figure__label">Limite total</span>${figureValue(c.limit)}</div></div>
-            <div class="card"><div class="figure"><span class="figure__label">Limite utilizado</span>${figureValue(c.used, 'md')}</div></div>
+            <div class="card kpi--accent"><div class="figure"><span class="figure__label">Próxima fatura (soma) ${infoTip('Soma das faturas abertas (ciclo atual) de todos os cartões. A divisão por cartão está logo abaixo.')}</span>${figureValue(a.openBills.total, 'md')}<div class="figure__meta">${a.openBills.withCycle} ${a.openBills.withCycle === 1 ? 'cartão' : 'cartões'}${a.openBills.nextDue ? ` · 1º vencimento ${formatDate(a.openBills.nextDue)}` : ''}</div></div></div>
+            <div class="card"><div class="figure"><span class="figure__label">Limite total</span>${figureValue(c.limit, 'md')}</div></div>
+            <div class="card"><div class="figure"><span class="figure__label">Limite utilizado · ${formatPercent(c.utilization)}</span>${figureValue(c.used, 'md')}${meter(c.utilization, 'Utilização total dos limites')}</div></div>
             <div class="card"><div class="figure"><span class="figure__label">Limite disponível</span>${figureValue(c.available, 'md')}</div></div>
-            <div class="card"><div class="figure"><span class="figure__label">Percentual utilizado</span><div class="figure__value figure__value--md">${formatPercent(c.utilization)}</div>${meter(c.utilization, 'Utilização total dos limites')}</div></div>
           </div>
           ${c.cardsWithoutData ? html`<div class="callout callout--info">${icon('info')}<div>${c.cardsWithoutData} cartão(ões) sem limite informado pela instituição ficam fora dos totais de limite.</div></div>` : ''}
+
+          <section class="card" aria-labelledby="cards-next-bill">
+            <div class="card__head">
+              <div class="card__title card__title--lg" id="cards-next-bill">${icon('receipt')}Próxima fatura por cartão</div>
+              ${a.openBills.nextDue ? badge(`1º vencimento ${formatDate(a.openBills.nextDue)}`, 'neutral', 'calendar') : ''}
+            </div>
+            ${openBillsPanel(a.openBills, { today: a.today, linkRows: true, hideTotal: true })}
+          </section>
 
           ${cards.map((card) => {
             const summary = a.bills.find((b) => b.card.id === card.id);

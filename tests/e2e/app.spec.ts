@@ -4,6 +4,8 @@ import { BAD_SECRET, CLIENT_ID, GOOD_SECRET, ITEM_ID, dumpIndexedDb, mockPluggy 
 const PASS = 'Minha-Senha-Local-2026';
 
 async function startDemo(page: Page) {
+  // Testes não dependem da internet: as Notas de Atualização caem na cópia embutida.
+  await page.route('https://api.github.com/**', (route) => route.fulfill({ status: 503, body: '' }));
   await page.goto('/');
   await page.getByRole('button', { name: 'Começar no modo demonstração' }).click();
   await expect(page.getByText('MODO DEMONSTRAÇÃO', { exact: true })).toBeVisible();
@@ -78,7 +80,7 @@ test.describe('Dashboard (modo demonstração)', () => {
 
 test.describe('Responsividade', () => {
   const widths = [320, 375, 390, 414, 768, 1024, 1280, 1440, 1920];
-  const routes = ['dashboard', 'contas', 'cartoes', 'faturas', 'transacoes', 'investimentos', 'fluxo', 'analises', 'configuracoes', 'privacidade'];
+  const routes = ['dashboard', 'contas', 'cartoes', 'faturas', 'transacoes', 'investimentos', 'fluxo', 'analises', 'configuracoes', 'privacidade', 'novidades'];
   for (const w of widths) {
     test(`sem overflow horizontal em ${w}px`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: 900 });

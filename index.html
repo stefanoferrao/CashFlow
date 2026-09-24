@@ -4,7 +4,9 @@
     <meta charset="UTF-8" />
     <!-- CSP -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="referrer" content="no-referrer" />
+    <!-- Chamadas à API, logos e imagens definem "no-referrer" individualmente. A política do documento envia no máximo
+         a ORIGEM (nunca caminho/rota) — o widget Pluggy Connect precisa dela para concluir autorizações Open Finance/Meu Pluggy. -->
+    <meta name="referrer" content="strict-origin" />
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#F6F7F9" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0F1115" media="(prefers-color-scheme: dark)" />

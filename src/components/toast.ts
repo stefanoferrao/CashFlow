@@ -30,6 +30,6 @@ export function mountToasts(host: HTMLElement): () => void {
     });
     host.appendChild(el);
     while (host.children.length > 4) host.firstElementChild?.remove();
-    if (!n.sticky) setTimeout(close, n.kind === 'error' ? 9000 : 5000);
+    if (!n.sticky) setTimeout(close, n.durationMs ?? (n.kind === 'error' ? 9000 : 5000));
   });
 }

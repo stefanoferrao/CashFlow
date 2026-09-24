@@ -109,6 +109,7 @@ export function mount(ctx: PageContext): () => void {
                       const it = ds.items.find((i) => i.id === id) ?? null;
                       return html`<div class="list-item">${it ? instLogo(it.institution) : html`<span class="inst-logo">${icon('bank')}</span>`}
                         <span class="list-item__main"><span class="list-item__title">${it?.institution.name ?? 'Aguardando sincronização'}</span><span class="list-item__sub">${it?.institution.via ? `via ${it.institution.via} · ` : ''}<code>${id.slice(0, 8)}…${id.slice(-4)}</code></span></span>
+                        ${(ds.duplicates ?? []).some((d) => d.itemId === id) ? badge('Repetida', 'warn', 'alert') : ''}
                         ${itemStatusBadge(it, s.sync.status === 'syncing')}
                         ${it ? html`<button class="icon-btn icon-btn--sm" data-action="edit-identity" data-value="${id}" aria-label="Personalizar ${it.institution.name}" data-tip="Personalizar">${icon('palette')}</button>` : ''}
                         <button class="icon-btn icon-btn--sm" data-action="remove-item" data-value="${id}" aria-label="Remover ${it?.institution.name ?? id} deste navegador">${icon('trash')}</button></div>`;
@@ -202,7 +203,7 @@ export function mount(ctx: PageContext): () => void {
 
           <section class="card settings-section" id="set-sobre">
             <div class="card__title card__title--lg">${icon('info')}Sobre</div>
-            ${row(`${APP_CONFIG.name} ${APP_CONFIG.version}`, 'Aplicação 100% frontend sobre a API da Pluggy. Sem backend próprio, sem analytics, sem telemetria.', html`<a class="btn btn--ghost btn--sm" href="#/privacidade">${icon('shield')}Privacidade</a>`)}
+            ${row(`${APP_CONFIG.name} ${APP_CONFIG.version}`, 'Aplicação 100% frontend sobre a API da Pluggy. Sem backend próprio, sem analytics, sem telemetria.', html`<a class="btn btn--secondary btn--sm" href="#/novidades">${icon('gift')}Notas de Atualização</a><a class="btn btn--ghost btn--sm" href="#/privacidade">${icon('shield')}Privacidade</a>`)}
             ${row('Bibliotecas', html`Chart.js 4.5.1 (MIT) · GridStack 13.3.0 (MIT) · DM Sans (OFL) · Vite (MIT, apenas build) · Ícones de instituições: <a href="https://github.com/henriquezolini/react-bancos" target="_blank" rel="noopener noreferrer">react-bancos</a> (MIT). Os logos são marcas de seus titulares, usados só para identificar as instituições.`, '')}
             ${row('Documentação da Pluggy', html`<a href="https://docs.pluggy.ai/pt/docs/overview" target="_blank" rel="noopener noreferrer">docs.pluggy.ai</a> · <a href="https://meu.pluggy.ai" target="_blank" rel="noopener noreferrer">meu.pluggy.ai</a>`, '')}
             ${row('Modo de depuração', 'Registra no console deste navegador informações técnicas REDIGIDAS (sem segredos, tokens ou documentos).', html`<label class="switch"><input type="checkbox" data-change="debug" ${s.preferences.debug ? 'checked' : ''} /><span class="switch__track"></span><span class="sr-only">Modo de depuração</span></label>`)}

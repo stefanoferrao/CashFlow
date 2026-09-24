@@ -66,10 +66,21 @@ senha local ──PBKDF2-SHA256 (salt aleatório de 16 bytes, 600.000 iteraçõe
 - **XSS:** descrições de transações e nomes vindos dos bancos são texto não confiável. Toda renderização passa por um template
   que **escapa HTML por padrão**; não há `innerHTML` com dados. Um teste E2E injeta `<img onerror=…>` como descrição e verifica que nada executa.
 - **CSP** (build de produção): `default-src 'self'`; scripts só do próprio site e de `https://cdn.pluggy.ai`; conexões só com
-  `*.pluggy.ai`; `worker-src 'self'` e `manifest-src 'self'` (PWA); `object-src 'none'`; `base-uri 'self'`; `form-action 'self'`.
+  `*.pluggy.ai` e `api.github.com` (somente a tela Notas de Atualização); `worker-src 'self'` e `manifest-src 'self'` (PWA);
+  `object-src 'none'`; `base-uri 'self'`; `form-action 'self'`.
 - **Dependências de runtime:** Chart.js e GridStack (versões fixas) e uma fonte local. Sem framework de UI, sem CDN de terceiros
   além da Pluggy, sem scripts de analytics.
-- **Requisições:** `credentials: 'omit'` (nenhum cookie vai junto) e `referrerPolicy: 'no-referrer'`.
+- **Requisições:** `credentials: 'omit'` (nenhum cookie vai junto) e `referrerPolicy: 'no-referrer'` em todas as chamadas à API e
+  nos logos. A política do documento é `strict-origin`: no máximo a **origem** do site (nunca a rota, que pode indicar a tela
+  aberta) vai ao widget Pluggy Connect, que precisa dela para concluir autorizações do Open Finance e do Meu Pluggy.
+- **Pluggy Connect:** o `connect_token` leva `avoidDuplicates` (a Pluggy recusa conexões repetidas), `clientUserId` e, em https,
+  `oauthRedirectUri` (o endereço do próprio app). O `clientUserId` é `cashflow-` + os primeiros 24 hexadecimais do SHA-256 de
+  `cashflow|<Client ID>`: é estável entre aparelhos e não permite recuperar o Client ID. Quando a Pluggy informa que a conta já está
+  conectada, o app reaproveita o Item existente (os IDs vêm no próprio erro do widget) em vez de criar outro.
+- **Notas de Atualização:** consultam `https://api.github.com/repos/stefanoferrao/CashFlow/releases` **só quando a tela é aberta**,
+  sem cookies e sem referrer; nenhum dado do usuário é enviado. O texto das notas é tratado como não confiável: o Markdown é
+  convertido por um renderizador próprio que escapa todo HTML e só gera links `http(s)` (com `rel="noopener noreferrer"`). A lista
+  fica em cache por 6 horas no IndexedDB (conteúdo público, sem cifra) e, sem internet, o app mostra as notas embutidas da versão.
 - **Logs:** desligados por padrão. O "modo de depuração" passa tudo por um redator que remove Secret, `apiKey`/JWT, `X-API-KEY`,
   CPF, CNPJ e identificadores.
 - **Erros:** o usuário vê mensagens amigáveis; stack traces e corpos de resposta não são exibidos.

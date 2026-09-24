@@ -13,8 +13,9 @@ import type { Analytics } from '../services/analytics';
 import { calculateCashFlow, calculateProjectedBalance, buildProjectionEvents, lastMonths } from '../services/financialCalculator';
 import { store } from '../state/store';
 import { clearLayout, loadLayout, saveLayout, type DashboardLayout, type WidgetLayout } from '../storage/preferences';
-import { addDays, diffDays, monthEnd } from '../utils/dates';
+import { addDays, monthEnd } from '../utils/dates';
 import { formatDate, formatMoney, formatMonthKeyShort, formatPercent, formatShortDate } from '../utils/format';
+import { openBillsPanel } from './billsOverview';
 import { CLASS_COLOR, analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, instLabel, noDataState, onDataChange, openAddInstitution, tableToggle } from './shared';
 
 const LAYOUT_VERSION = 3;
@@ -117,10 +118,12 @@ const WIDGETS: WidgetDef[] = [
     visibleByDefault: true,
     render: (a) => {
       const b = a.investmentBreakdown;
-      const r = a.investmentReturn;
-      return html`${cardHead('Investimentos', 'trending', infoTip('Valor líquido informado pela instituição, separado do saldo em contas.'))}
+      const p = a.investmentPerformance;
+      return html`${cardHead('Investimentos', 'trending', infoTip('Valor líquido informado pela instituição, separado do saldo em contas. Rendimento = valor atual + resgates − total aplicado, só nos produtos em que o valor aplicado é conhecido.'))}
         <div class="figure">${figureValue(a.totalInvestments.base)}
-          <div class="figure__meta">${r ? html`${delta(r.rate)}<span>rentabilidade informada${r.coverage < 1 ? ` (${formatPercent(r.coverage)} da carteira)` : ''}</span>` : html`<span>Rentabilidade não informada pela instituição</span>`}</div>
+          <div class="figure__meta">${p.productsCovered && p.rate !== null
+            ? html`${delta(p.rate)}<span><strong class="money ${p.profit < 0 ? 'neg' : 'pos'}">${p.profit >= 0 ? '+' : '−'}${formatMoney(Math.abs(p.profit))}</strong> de rendimento${p.coverage < 0.999 ? ` · ${formatPercent(p.coverage)} da carteira` : ''}</span>`
+            : html`<span>Rendimento: valor aplicado não informado · <a href="#/investimentos">ver detalhes</a></span>`}</div>
         </div>
         ${b.length
           ? html`<div class="dist-list dist-list--compact">${CLASS_ORDER.map((k) => b.find((x) => x.key === k))
@@ -209,31 +212,15 @@ const WIDGETS: WidgetDef[] = [
     id: 'fatura',
     title: 'Fatura atual',
     icon: 'receipt',
-    layout: { x: 0, y: 11, w: 6, h: 4, minW: 4, minH: 3 },
+    layout: { x: 0, y: 11, w: 6, h: 5, minW: 4, minH: 4 },
     visibleByDefault: true,
     render: (a) => {
-      const next = [...a.bills].sort((x, y) => x.cycle.due.localeCompare(y.cycle.due))[0];
-      if (!next) {
-        const hasCards = store.state.dataset.cards.length > 0;
-        return html`${cardHead('Fatura atual', 'receipt')}${na(hasCards ? 'Datas de fechamento não informadas pela instituição' : 'Nenhum cartão de crédito conectado')}
-          ${hasCards ? html`<div class="card__foot"><a href="#/configuracoes?secao=cartoes">Definir fechamento e vencimento</a>${icon('chevronRight')}</div>` : ''}`;
-      }
-      const p = a.billProjections[next.card.id]!;
-      const days = diffDays(a.today, next.cycle.due);
-      return html`${cardHead(`Fatura atual · ${next.card.label ?? next.card.name}`, 'receipt', next.cycle.estimated ? badge('Datas estimadas', 'warn', 'info') : badge(days <= 0 ? 'Vence hoje' : `Vence em ${days} d`, days <= 5 ? 'warn' : 'neutral', 'calendar'))}
-        <div class="split">
-          <div class="figure">
-            <span class="figure__label">Valor acumulado</span>
-            ${figureValue(next.total, 'display')}
-            <div class="figure__meta"><span>Previsão de fechamento</span><strong class="money">${formatMoney(p.paceForecast)}</strong></div>
-          </div>
-          <div class="kv-list">
-            ${kv('Fechamento', formatDate(next.cycle.closing))}
-            ${kv('Vencimento', formatDate(next.cycle.due))}
-            ${kv('Lançamentos futuros', money(next.future))}
-          </div>
-        </div>
-        ${a.bills.length > 1 ? html`<p class="field__hint">Total em faturas abertas (${a.bills.length} cartões): <strong class="money">${formatMoney(a.openBillsTotal)}</strong></p>` : ''}
+      const cards = store.state.dataset.cards;
+      if (!cards.length) return html`${cardHead('Fatura atual', 'receipt')}${na('Nenhum cartão de crédito conectado')}`;
+      const ov = a.openBills;
+      const title = cards.length > 1 ? 'Faturas atuais · todos os cartões' : `Fatura atual · ${cards[0]!.label ?? cards[0]!.name}`;
+      return html`${cardHead(title, 'receipt', infoTip('Soma das faturas do ciclo aberto de cada cartão (compras e estornos do ciclo + parcelas previstas). A barra e a lista mostram quanto cada cartão representa do total.'))}
+        ${openBillsPanel(ov, { today: a.today, compact: true, linkRows: true, showPace: true, title: cards.length > 1 ? 'Total a pagar nas próximas faturas' : 'Valor acumulado' })}
         <div class="card__foot"><a href="#/faturas">Previsão detalhada</a>${icon('chevronRight')}</div>`;
     },
   },
@@ -241,7 +228,7 @@ const WIDGETS: WidgetDef[] = [
     id: 'cartoes',
     title: 'Cartões',
     icon: 'card',
-    layout: { x: 6, y: 11, w: 6, h: 4, minW: 4, minH: 3 },
+    layout: { x: 6, y: 11, w: 6, h: 5, minW: 4, minH: 3 },
     visibleByDefault: true,
     render: (a) => {
       const c = a.credit;
@@ -265,7 +252,7 @@ const WIDGETS: WidgetDef[] = [
     id: 'receitas',
     title: 'Receitas',
     icon: 'arrowDown',
-    layout: { x: 0, y: 15, w: 4, h: 4, minW: 3, minH: 3 },
+    layout: { x: 0, y: 16, w: 4, h: 4, minW: 3, minH: 3 },
     visibleByDefault: true,
     render: (a) => {
       const o = a.outlook;
@@ -282,7 +269,7 @@ const WIDGETS: WidgetDef[] = [
     id: 'despesas',
     title: 'Despesas',
     icon: 'arrowUp',
-    layout: { x: 4, y: 15, w: 4, h: 4, minW: 3, minH: 3 },
+    layout: { x: 4, y: 16, w: 4, h: 4, minW: 3, minH: 3 },
     visibleByDefault: true,
     render: (a) => {
       const o = a.outlook;
@@ -301,7 +288,7 @@ const WIDGETS: WidgetDef[] = [
     id: 'proximos',
     title: 'Próximos gastos',
     icon: 'calendar',
-    layout: { x: 8, y: 15, w: 4, h: 4, minW: 3, minH: 3 },
+    layout: { x: 8, y: 16, w: 4, h: 4, minW: 3, minH: 3 },
     visibleByDefault: true,
     render: (a) => {
       const list = a.upcoming.slice(0, 4);
@@ -324,7 +311,7 @@ const WIDGETS: WidgetDef[] = [
     id: 'projecao',
     title: 'Saldo projetado',
     icon: 'target',
-    layout: { x: 0, y: 19, w: 8, h: 5, minW: 5, minH: 4 },
+    layout: { x: 0, y: 20, w: 8, h: 5, minW: 5, minH: 4 },
     wide: true,
     visibleByDefault: false,
     render: (a) => {
@@ -350,7 +337,7 @@ const WIDGETS: WidgetDef[] = [
     id: 'insights',
     title: 'Insights',
     icon: 'bulb',
-    layout: { x: 8, y: 19, w: 4, h: 5, minW: 3, minH: 4 },
+    layout: { x: 8, y: 20, w: 4, h: 5, minW: 3, minH: 4 },
     visibleByDefault: false,
     render: (a) =>
       html`${cardHead('Insights', 'bulb')}
@@ -395,6 +382,61 @@ function normalizeLayout(saved: DashboardLayout | null): DashboardLayout {
   return { version: LAYOUT_VERSION, widgets, mobileOrder: order };
 }
 
+// ------------------------------------------------------------------ personalização (tamanho)
+
+/** Larguras "redondas" oferecidas pelos botões (em colunas de 12). */
+const WIDTH_STEPS = [3, 4, 6, 8, 12];
+const MAX_H = 14;
+
+export function widthLabel(w: number): string {
+  const named: Record<number, string> = { 3: '1/4', 4: '1/3', 6: '1/2', 8: '2/3', 9: '3/4', 12: 'Inteira' };
+  return named[w] ?? `${w}/12`;
+}
+
+/** Próxima largura ao clicar em "+" ou "−" (respeita a largura mínima do card). */
+export function nextWidth(w: number, dir: 1 | -1, minW: number): number {
+  if (dir > 0) return WIDTH_STEPS.find((s) => s > w) ?? 12;
+  const prev = [...WIDTH_STEPS].reverse().find((s) => s < w);
+  if (prev === undefined) return w;
+  return Math.max(prev, Math.min(minW, w));
+}
+
+export function nextHeight(h: number, dir: 1 | -1, minH: number): number {
+  return Math.min(MAX_H, Math.max(minH, h + dir));
+}
+
+function editOverlay(def: WidgetDef, w: WidgetLayout, grid: boolean, idx: number, count: number): SafeHtml {
+  const locked = w.pinned;
+  const t = def.title;
+  const bar = html`<div class="dash-edit__bar ${grid && !locked ? 'is-draggable' : ''}" ${grid && !locked ? html`title="Arraste para mover"` : ''}>
+      ${grid ? html`<span class="dash-edit__grip" aria-hidden="true">${icon(locked ? 'lock' : 'grip')}</span>` : ''}
+      <span class="dash-edit__title"><strong class="truncate">${t}</strong><span class="dash-edit__hint">${grid ? (locked ? 'Fixado — não se move' : 'Arraste por esta barra para mover') : 'Use as setas para reordenar'}</span></span>
+      <span class="dash-edit__tools">
+        ${grid
+          ? html`<button type="button" class="icon-btn icon-btn--xs" data-action="pin-widget" data-value="${def.id}" aria-pressed="${w.pinned}" aria-label="${w.pinned ? 'Desafixar' : 'Fixar posição de'} ${t}" data-tip="${w.pinned ? 'Desafixar (permitir mover)' : 'Fixar posição e tamanho'}">${icon('pin')}</button>`
+          : html`<button type="button" class="icon-btn icon-btn--xs" data-action="move-up" data-value="${def.id}" aria-label="Mover ${t} para cima" data-tip="Mover para cima" ${idx === 0 ? 'disabled' : ''}>${icon('chevronUp')}</button>
+            <button type="button" class="icon-btn icon-btn--xs" data-action="move-down" data-value="${def.id}" aria-label="Mover ${t} para baixo" data-tip="Mover para baixo" ${idx === count - 1 ? 'disabled' : ''}>${icon('chevronDown')}</button>`}
+        <button type="button" class="icon-btn icon-btn--xs" data-action="hide-widget" data-value="${def.id}" aria-label="Ocultar ${t}" data-tip="Ocultar este card">${icon('eyeOff')}</button>
+      </span>
+    </div>`;
+  if (!grid) return html`<div class="dash-edit dash-edit--flow">${bar}</div>`;
+  const dis = locked ? 'disabled' : '';
+  return html`<div class="dash-edit" data-edit-for="${def.id}">
+    ${bar}
+    <div class="dash-edit__size" role="group" aria-label="Tamanho de ${t}">
+      <span class="dash-edit__dim" data-tip="Largura (em relação à linha do dashboard)">${icon('width')}<span class="sr-only">Largura</span></span>
+      <button type="button" class="dash-edit__step" data-action="size" data-value="${def.id}" data-dim="w" data-dir="-1" aria-label="Diminuir a largura de ${t}" ${dis} ${w.w <= def.layout.minW ? 'disabled' : ''}>${icon('minus')}</button>
+      <output class="dash-edit__val" data-size-w aria-live="polite" title="${w.w} de 12 colunas">${widthLabel(w.w)}</output>
+      <button type="button" class="dash-edit__step" data-action="size" data-value="${def.id}" data-dim="w" data-dir="1" aria-label="Aumentar a largura de ${t}" ${dis} ${w.w >= 12 ? 'disabled' : ''}>${icon('plus')}</button>
+      <span class="dash-edit__sep" aria-hidden="true"></span>
+      <span class="dash-edit__dim" data-tip="Altura (em linhas)">${icon('height')}<span class="sr-only">Altura</span></span>
+      <button type="button" class="dash-edit__step" data-action="size" data-value="${def.id}" data-dim="h" data-dir="-1" aria-label="Diminuir a altura de ${t}" ${dis} ${w.h <= def.layout.minH ? 'disabled' : ''}>${icon('minus')}</button>
+      <output class="dash-edit__val" data-size-h aria-live="polite">${w.h}</output>
+      <button type="button" class="dash-edit__step" data-action="size" data-value="${def.id}" data-dim="h" data-dir="1" aria-label="Aumentar a altura de ${t}" ${dis} ${w.h >= MAX_H ? 'disabled' : ''}>${icon('plus')}</button>
+    </div>
+  </div>`;
+}
+
 // ------------------------------------------------------------------ página
 
 export function mount(ctx: PageContext): () => void {
@@ -407,7 +449,7 @@ export function mount(ctx: PageContext): () => void {
 
   const useGrid = () => mq.matches;
 
-  const widgetContent = (def: WidgetDef, a: Analytics) => html`<div class="card card--fill dash-card" data-widget="${def.id}">${def.render(a)}</div>`;
+  const widgetContent = (def: WidgetDef, a: Analytics) => html`<div class="card card--fill dash-card" data-widget="${def.id}" ${editing ? 'inert' : ''}>${def.render(a)}</div>`;
 
   const renderPage = async () => {
     if (disposed) return;
@@ -430,24 +472,37 @@ export function mount(ctx: PageContext): () => void {
       </div>
     </div>`;
 
+    const grid0 = useGrid();
     const panel = editing
       ? html`<section class="card customize-panel" aria-label="Personalizar dashboard">
           <div class="row-between wrap">
             <div class="stack-sm">
-              <strong>Personalizar dashboard</strong>
-              <span class="muted">${useGrid() ? 'Arraste os cards pela borda superior e redimensione pelo canto. Cards fixados não se movem.' : 'Mostre, oculte e reordene os cards.'}</span>
+              <strong class="customize-panel__title">${icon('layout')}Personalizar dashboard</strong>
+              <span class="muted">As mudanças são salvas automaticamente neste navegador. Clique em <strong>Concluir</strong> quando terminar.</span>
             </div>
-            <button type="button" class="btn btn--ghost btn--sm" data-action="reset-layout">${icon('refresh')}Restaurar padrão</button>
+            <div class="row wrap">
+              <button type="button" class="btn btn--ghost btn--sm" data-action="reset-layout">${icon('refresh')}Restaurar padrão</button>
+              <button type="button" class="btn btn--primary btn--sm" data-action="customize">${icon('check')}Concluir</button>
+            </div>
           </div>
+          <ol class="customize-steps">
+            ${grid0
+              ? html`<li><span class="customize-steps__icon">${icon('grip')}</span><span><strong>Mover:</strong> segure a barra verde no topo do card e arraste até o lugar desejado.</span></li>
+                  <li><span class="customize-steps__icon">${icon('width')}</span><span><strong>Tamanho:</strong> use <em>Largura</em> e <em>Altura</em> (− / +) no rodapé do card, ou arraste o canto ${icon('resize')} inferior direito.</span></li>
+                  <li><span class="customize-steps__icon">${icon('eye')}</span><span><strong>Mostrar/ocultar:</strong> marque os cards na lista abaixo ou use ${icon('eyeOff')} no card. ${icon('pin')} fixa posição e tamanho.</span></li>`
+              : html`<li><span class="customize-steps__icon">${icon('chevronUp')}</span><span><strong>Ordem:</strong> use as setas ↑ ↓ no topo de cada card (ou na lista abaixo).</span></li>
+                  <li><span class="customize-steps__icon">${icon('eye')}</span><span><strong>Mostrar/ocultar:</strong> marque os cards na lista abaixo ou use ${icon('eyeOff')} no card.</span></li>
+                  <li><span class="customize-steps__icon">${icon('monitor')}</span><span>Em telas largas (computador) também é possível arrastar e mudar o tamanho dos cards.</span></li>`}
+          </ol>
           <ul class="customize-list">
-            ${(useGrid() ? layout.widgets.map((w) => w.id) : layout.mobileOrder ?? []).map((id, idx, arr) => {
+            ${(grid0 ? layout.widgets.map((w) => w.id) : layout.mobileOrder ?? []).map((id, idx, arr) => {
               const w = layout.widgets.find((x) => x.id === id)!;
               const def = WIDGET_BY_ID.get(id)!;
-              return html`<li class="customize-item">
+              return html`<li class="customize-item ${w.visible ? '' : 'is-off'}">
                 <label class="check"><input type="checkbox" data-action="toggle-widget" data-value="${id}" ${w.visible ? 'checked' : ''} />${def.title}</label>
                 <span class="row">
-                  ${useGrid()
-                    ? html`<button type="button" class="icon-btn icon-btn--sm" data-action="pin-widget" data-value="${id}" aria-pressed="${w.pinned}" aria-label="${w.pinned ? 'Desafixar' : 'Fixar'} ${def.title}" data-tip="${w.pinned ? 'Desafixar' : 'Fixar posição'}" ${w.visible ? '' : 'disabled'}>${icon('pin')}</button>`
+                  ${grid0
+                    ? html`${w.visible ? html`<span class="customize-item__size" title="Largura e altura">${widthLabel(w.w)} · ${w.h}</span>` : ''}<button type="button" class="icon-btn icon-btn--sm" data-action="pin-widget" data-value="${id}" aria-pressed="${w.pinned}" aria-label="${w.pinned ? 'Desafixar' : 'Fixar'} ${def.title}" data-tip="${w.pinned ? 'Desafixar' : 'Fixar posição'}" ${w.visible ? '' : 'disabled'}>${icon('pin')}</button>`
                     : html`<button type="button" class="icon-btn icon-btn--sm" data-action="move-up" data-value="${id}" aria-label="Mover ${def.title} para cima" ${idx === 0 ? 'disabled' : ''}>${icon('chevronUp')}</button>
                         <button type="button" class="icon-btn icon-btn--sm" data-action="move-down" data-value="${id}" aria-label="Mover ${def.title} para baixo" ${idx === arr.length - 1 ? 'disabled' : ''}>${icon('chevronDown')}</button>`}
                 </span>
@@ -462,16 +517,17 @@ export function mount(ctx: PageContext): () => void {
       body = html`<div class="grid-stack dash-grid ${editing ? 'is-editing' : ''}">
         ${visible.map((w) => {
           const def = WIDGET_BY_ID.get(w.id)!;
-          return html`<div class="grid-stack-item ${w.pinned ? 'is-pinned' : ''}" gs-id="${w.id}" gs-x="${w.x}" gs-y="${w.y}" gs-w="${w.w}" gs-h="${w.h}" gs-min-w="${def.layout.minW}" gs-min-h="${def.layout.minH}" ${w.pinned ? html`gs-locked="true" gs-no-move="true" gs-no-resize="true"` : ''}>
-            <div class="grid-stack-item-content">${widgetContent(def, a)}</div>
+          return html`<div class="grid-stack-item ${w.pinned ? 'is-pinned' : ''}" gs-id="${w.id}" gs-x="${w.x}" gs-y="${w.y}" gs-w="${w.w}" gs-h="${w.h}" gs-min-w="${def.layout.minW}" gs-min-h="${def.layout.minH}" gs-max-h="${MAX_H}" ${w.pinned ? html`gs-locked="true" gs-no-move="true" gs-no-resize="true"` : ''}>
+            <div class="grid-stack-item-content">${editing ? editOverlay(def, w, true, 0, 0) : ''}${widgetContent(def, a)}</div>
           </div>`;
         })}
       </div>`;
     } else {
       const order = (layout.mobileOrder ?? []).filter((id) => visible.some((v) => v.id === id));
-      body = html`<div class="dash-flow">${order.map((id) => {
+      body = html`<div class="dash-flow ${editing ? 'is-editing' : ''}">${order.map((id, idx) => {
         const def = WIDGET_BY_ID.get(id)!;
-        return html`<div class="dash-flow__item ${def.wide ? 'is-wide' : ''}">${widgetContent(def, a)}</div>`;
+        const w = layout.widgets.find((x) => x.id === id)!;
+        return html`<div class="dash-flow__item ${def.wide ? 'is-wide' : ''}">${editing ? editOverlay(def, w, false, idx, order.length) : ''}${widgetContent(def, a)}</div>`;
       })}</div>`;
     }
 
@@ -497,8 +553,9 @@ export function mount(ctx: PageContext): () => void {
           float: false,
           animate: true,
           staticGrid: !editing,
-          handle: '.card__head',
-          resizable: { handles: 'se' },
+          handle: '.dash-edit__bar.is-draggable',
+          alwaysShowResizeHandle: true,
+          resizable: { handles: 'se', autoHide: false },
         },
         gridEl,
       );
@@ -513,6 +570,7 @@ export function mount(ctx: PageContext): () => void {
             return n ? { ...w, x: n.x ?? w.x, y: n.y ?? w.y, w: n.w ?? w.w, h: n.h ?? w.h } : w;
           }),
         };
+        syncSizeControls();
         void saveLayout(layout);
       });
       g.on('resizestop', () => {
@@ -531,9 +589,60 @@ export function mount(ctx: PageContext): () => void {
     layout = { ...layout, widgets: layout.widgets.map((w) => (w.id === id ? { ...w, ...patch } : w)) };
   };
 
+  /** Atualiza os rótulos e botões de tamanho sem repintar a página (depois de mover/redimensionar). */
+  const syncSizeControls = () => {
+    for (const w of layout.widgets) {
+      const box = root.querySelector<HTMLElement>(`[data-edit-for="${w.id}"]`);
+      const def = WIDGET_BY_ID.get(w.id);
+      if (!box || !def) continue;
+      const wv = box.querySelector<HTMLOutputElement>('[data-size-w]');
+      const hv = box.querySelector<HTMLOutputElement>('[data-size-h]');
+      if (wv) {
+        wv.textContent = widthLabel(w.w);
+        wv.title = `${w.w} de 12 colunas`;
+      }
+      if (hv) hv.textContent = String(w.h);
+      const btn = (dim: string, dir: string) => box.querySelector<HTMLButtonElement>(`[data-dim="${dim}"][data-dir="${dir}"]`);
+      if (!w.pinned) {
+        btn('w', '-1')!.disabled = w.w <= def.layout.minW;
+        btn('w', '1')!.disabled = w.w >= 12;
+        btn('h', '-1')!.disabled = w.h <= def.layout.minH;
+        btn('h', '1')!.disabled = w.h >= MAX_H;
+      }
+    }
+    for (const el of Array.from(root.querySelectorAll<HTMLElement>('.customize-item'))) {
+      const id = el.querySelector<HTMLInputElement>('[data-action="toggle-widget"]')?.dataset.value;
+      const w = layout.widgets.find((x) => x.id === id);
+      const size = el.querySelector<HTMLElement>('.customize-item__size');
+      if (w && size) size.textContent = `${widthLabel(w.w)} · ${w.h}`;
+    }
+  };
+
   const off = delegate(root, 'click', {
     ...commonHandlers,
     'add-institution': () => openAddInstitution(),
+    size: (el) => {
+      const id = el.dataset.value!;
+      const def = WIDGET_BY_ID.get(id);
+      const w = layout.widgets.find((x) => x.id === id);
+      const item = root.querySelector<HTMLElement>(`.grid-stack-item[gs-id="${id}"]`);
+      if (!def || !w || !grid || !item || w.pinned) return;
+      const dir = el.dataset.dir === '-1' ? -1 : 1;
+      if (el.dataset.dim === 'w') {
+        const nw = nextWidth(w.w, dir, def.layout.minW);
+        if (nw === w.w) return;
+        grid.update(item, { w: nw, x: Math.min(w.x, 12 - nw) });
+      } else {
+        const nh = nextHeight(w.h, dir, def.layout.minH);
+        if (nh === w.h) return;
+        grid.update(item, { h: nh });
+      }
+      requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+    },
+    'hide-widget': (el) => {
+      updateWidget(el.dataset.value!, { visible: false });
+      void persist();
+    },
     customize: () => {
       editing = !editing;
       void renderPage();

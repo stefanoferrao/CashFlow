@@ -4,7 +4,7 @@
 import { html, type SafeHtml } from '../components/dom';
 import { icon } from '../components/icons';
 import { openModal } from '../components/modal';
-import { type InstLike, instName, stateBlock } from '../components/ui';
+import { type InstLike, badge, instName, stateBlock } from '../components/ui';
 import { computeAnalytics, type Analytics } from '../services/analytics';
 import * as actions from '../state/actions';
 import { notify } from '../state/notify';
@@ -172,22 +172,30 @@ export function openAddInstitution(): void {
     title: 'Adicionar instituição',
     wide: true,
     body: html`
-      <p class="muted">Escolha como trazer seus dados. Nada passa por servidores do CashFlow — a comunicação é direta entre este navegador e a Pluggy.</p>
-      <div class="option-grid">
-        <div class="option-card">
-          <div class="row">${icon('plug')}<strong>Pluggy Connect</strong></div>
-          <p class="muted">Abre o widget oficial da Pluggy para conectar um banco (Open Finance ou conectores disponíveis no seu plano).</p>
-          <label class="check"><input type="checkbox" data-sandbox ${s.preferences.includeSandbox ? 'checked' : ''} /> Incluir conectores de teste (sandbox)</label>
-          <button type="button" class="btn btn--primary" data-connect>${icon('plus')}Abrir Pluggy Connect</button>
+      <p class="muted">Nada passa por servidores do CashFlow — a comunicação é direta entre este navegador e a Pluggy.</p>
+      <div class="connect-primary">
+        <div class="stack-sm">
+          <div class="row">${icon('plug')}<strong>Conectar pelo Pluggy Connect</strong> ${badge('recomendado', 'good')}</div>
+          <p class="muted">Abre o widget oficial da Pluggy. Escolha o seu banco — ou <strong>Meu Pluggy</strong>, para trazer os bancos que você já conectou em meu.pluggy.ai.</p>
+          <ul class="connect-benefits">
+            <li>${icon('check')}<span>Se a conta <strong>já estiver conectada</strong>, o CashFlow reaproveita a conexão existente — nenhuma conexão nova é criada.</span></li>
+            <li>${icon('check')}<span>Depois da autorização no banco, a conexão é registrada e sincronizada automaticamente.</span></li>
+          </ul>
         </div>
-        <div class="option-card">
-          <div class="row">${icon('link')}<strong>Tenho um Item ID</strong></div>
-          <p class="muted">Para conexões do <strong>Meu Pluggy</strong>: vincule o banco no Dashboard da Pluggy (conector MeuPluggy) e copie o Item ID.</p>
-          <label class="field"><span class="field__label">Item ID</span><input class="input" data-item-id placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false" /></label>
-          <p class="field__error" data-item-error hidden></p>
-          <button type="button" class="btn btn--secondary" data-add-id>${icon('check')}Adicionar Item</button>
+        <div class="stack-sm connect-primary__actions">
+          <button type="button" class="btn btn--primary" data-connect>${icon('plus')}Abrir Pluggy Connect</button>
+          <label class="check"><input type="checkbox" data-sandbox ${s.preferences.includeSandbox ? 'checked' : ''} /> Incluir conectores de teste (sandbox)</label>
         </div>
       </div>
+      <details class="details">
+        <summary>Tenho um Item ID (Dashboard da Pluggy / Meu Pluggy)</summary>
+        <p class="muted">Use quando a conexão já existe na sua aplicação Pluggy: no Dashboard da Pluggy, copie o <strong>Item ID</strong> (menu ⋯ → "Copiar Item ID").</p>
+        <div class="row wrap" style="align-items:flex-end">
+          <label class="field" style="flex:1 1 280px"><span class="field__label">Item ID</span><input class="input" data-item-id placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false" /></label>
+          <button type="button" class="btn btn--secondary" data-add-id>${icon('check')}Adicionar Item</button>
+        </div>
+        <p class="field__error" data-item-error hidden></p>
+      </details>
       <details class="details">
         <summary>Buscar automaticamente os Items da minha aplicação</summary>
         <p class="muted">Usa <code>GET /v2/items</code>, um recurso <strong>opcional</strong> que precisa ser habilitado pelo suporte da Pluggy. Se não estiver habilitado, você verá um aviso.</p>

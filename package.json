@@ -1,7 +1,7 @@
 {
   "name": "cashflow",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "CashFlow — plataforma pessoal de gestão financeira sobre a Pluggy, 100% frontend (sem backend próprio).",
   "type": "module",
   "license": "UNLICENSED",

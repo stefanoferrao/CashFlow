@@ -238,6 +238,179 @@ export function calculateInvestmentReturn(investments: NormalizedInvestment[], b
   return { profit: r2(profit), original: r2(original), rate: profit / original, coverage: covered / active.length };
 }
 
+// ------------------------------------------------------------------ rendimento dos investimentos
+
+/**
+ * De onde veio a base do cálculo de um produto:
+ *  - movements: movimentações do próprio produto (aplicações e resgates), com o histórico completo conferido;
+ *  - original:  valor aplicado informado pela instituição (amountOriginal);
+ *  - profit:    lucro informado pela instituição (amountProfit), quando não há valor aplicado.
+ */
+export type InvestmentBasisSource = 'movements' | 'original' | 'profit';
+
+export interface InvestmentPerformance {
+  id: string;
+  /** Total aplicado (soma das aplicações). */
+  applied: number;
+  /** Total que já saiu do produto para você (resgates, juros e amortizações pagos). */
+  withdrawn: number;
+  /** Valor atual bruto (antes de IR/IOF); na falta dele, o líquido. */
+  current: number;
+  /** Rendimento bruto = atual + resgatado − aplicado. */
+  profit: number;
+  /** Rendimento líquido estimado = rendimento bruto − impostos estimados pela instituição sobre a posição atual. */
+  profitNet: number;
+  /** Rentabilidade = rendimento ÷ aplicado. */
+  rate: number | null;
+  source: InvestmentBasisSource;
+  /** Data da primeira aplicação conhecida (quando há movimentações). */
+  since: DateKey | null;
+}
+
+export interface InvestmentPerformanceSummary {
+  applied: number;
+  withdrawn: number;
+  current: number;
+  profit: number;
+  profitNet: number;
+  rate: number | null;
+  /** Valor líquido total da carteira (base) e a parte coberta pelo cálculo. */
+  totalValue: number;
+  coveredValue: number;
+  /** Fração do valor da carteira com base confiável (0..1). */
+  coverage: number;
+  productsCovered: number;
+  productsTotal: number;
+  bySource: Record<InvestmentBasisSource, number>;
+  /** Produtos sem base confiável (não entram na conta — nunca viram "zero"). */
+  uncovered: Array<{ id: string; name: string; value: number; reason: string }>;
+  /** Rentabilidade de 12 meses informada pela instituição (média ponderada pelo valor), quando existe. */
+  informed12m: { rate: number; coverage: number } | null;
+  perProduct: Record<string, InvestmentPerformance>;
+}
+
+const TOL = 0.01;
+
+/** Confere se as movimentações cobrem a vida inteira do produto (senão o "valor aplicado" ficaria incompleto). */
+function movementsAreComplete(i: NormalizedInvestment, mv: NonNullable<NormalizedInvestment['movements']>): { ok: boolean; reason: string } {
+  if (!mv.length) return { ok: false, reason: 'sem movimentações' };
+  if (mv.some((m) => m.type === 'TRANSFER' && m.direction === null)) return { ok: false, reason: 'transferência sem sentido informado' };
+  const first = mv[0]!;
+  if (first.direction !== 'in') return { ok: false, reason: 'histórico começa depois da primeira aplicação' };
+  const firstDate = first.date;
+  // 1) quantidade reconciliada: Σ entradas − Σ saídas = posição atual.
+  const qtyMoves = mv.filter((m) => m.type === 'BUY' || m.type === 'SELL' || m.type === 'TRANSFER');
+  if (typeof i.quantity === 'number' && i.quantity > 0 && qtyMoves.length && qtyMoves.every((m) => m.quantity !== null)) {
+    const net = qtyMoves.reduce((s, m) => s + (m.direction === 'in' ? m.quantity! : -m.quantity!), 0);
+    if (Math.abs(net - i.quantity) <= Math.max(0.01, i.quantity * 0.005)) return { ok: true, reason: 'quantidade conferida' };
+    return { ok: false, reason: 'quantidade das movimentações não bate com a posição' };
+  }
+  // 2) primeira movimentação na data da aplicação (ou da emissão, em títulos emitidos para você).
+  const ref = i.purchaseDate ?? i.issueDate ?? null;
+  if (ref && firstDate <= addDays(ref, 7)) return { ok: true, reason: 'desde a data da aplicação' };
+  return { ok: false, reason: ref ? 'histórico não chega à data da aplicação' : 'sem data da aplicação para conferir o histórico' };
+}
+
+/** Rendimento de um produto, pela base mais confiável disponível. null = sem base confiável. */
+export function calculateProductPerformance(i: NormalizedInvestment, today: DateKey): { perf: InvestmentPerformance | null; reason: string } {
+  const current = i.grossValue !== null && i.grossValue > 0 ? i.grossValue : i.value;
+  const taxEstimate = i.grossValue !== null && i.grossValue > 0 ? Math.max(0, i.grossValue - i.value) : 0;
+  const build = (applied: number, withdrawn: number, source: InvestmentBasisSource, since: DateKey | null): InvestmentPerformance => {
+    const profit = r2(current + withdrawn - applied);
+    return { id: i.id, applied: r2(applied), withdrawn: r2(withdrawn), current: r2(current), profit, profitNet: r2(profit - taxEstimate), rate: applied > 0 ? profit / applied : null, source, since };
+  };
+
+  // 1) Movimentações do produto com histórico completo.
+  let reason = 'a instituição não informa o valor aplicado';
+  if (i.movements && i.movements.length) {
+    const check = movementsAreComplete(i, i.movements);
+    if (check.ok) {
+      let applied = 0;
+      let withdrawn = 0;
+      for (const m of i.movements) {
+        if (m.type === 'TAX') continue; // imposto pago no resgate: o bruto ignora; o líquido desconta pela posição atual
+        if (m.direction === 'in') applied += m.amount;
+        else if (m.direction === 'out') withdrawn += m.amount;
+      }
+      if (applied > 0) return { perf: build(applied, withdrawn, 'movements', i.movements[0]!.date), reason: check.reason };
+    } else {
+      reason = `movimentações incompletas (${check.reason})`;
+    }
+  }
+
+  // 2) Valor aplicado informado pela instituição.
+  if (i.originalValue !== null && i.originalValue > 0) {
+    const same = Math.abs(i.originalValue - current) < TOL;
+    const recent = !!i.purchaseDate && diffDays(i.purchaseDate, today) <= 7;
+    // Valor aplicado idêntico ao atual e aplicação antiga = a instituição repetiu o saldo (não é "rendimento zero").
+    if (!same || recent) return { perf: build(i.originalValue, 0, 'original', i.purchaseDate ?? null), reason: 'valor aplicado informado' };
+    reason = 'valor aplicado informado é igual ao valor atual (não permite calcular)';
+  }
+
+  // 3) Lucro informado (líquido, segundo a Pluggy) → aplicado = líquido atual − lucro.
+  if (i.profit !== null && Math.abs(i.profit) >= TOL) {
+    const applied = i.value - i.profit;
+    if (applied > 0) return { perf: build(applied, 0, 'profit', i.purchaseDate ?? null), reason: 'lucro informado' };
+  }
+  return { perf: null, reason };
+}
+
+/**
+ * Rendimento da carteira: soma SÓ dos produtos com base confiável (movimentações completas ou valor aplicado/lucro
+ * informados). Produtos sem base ficam de fora e são listados — nunca contam como rendimento zero.
+ */
+export function calculateInvestmentPerformance(investments: NormalizedInvestment[], today: DateKey, base = BASE): InvestmentPerformanceSummary {
+  const active = investments.filter((i) => i.currency === base && i.status !== 'TOTAL_WITHDRAWAL');
+  const perProduct: Record<string, InvestmentPerformance> = {};
+  const uncovered: InvestmentPerformanceSummary['uncovered'] = [];
+  const bySource: Record<InvestmentBasisSource, number> = { movements: 0, original: 0, profit: 0 };
+  let applied = 0;
+  let withdrawn = 0;
+  let current = 0;
+  let profitNet = 0;
+  let totalValue = 0;
+  let coveredValue = 0;
+  let r12Value = 0;
+  let r12Weighted = 0;
+  for (const i of active) {
+    totalValue += i.value;
+    if (i.lastTwelveMonthsRate !== null && i.value > 0) {
+      r12Value += i.value;
+      r12Weighted += i.value * i.lastTwelveMonthsRate;
+    }
+    const { perf, reason } = calculateProductPerformance(i, today);
+    if (!perf) {
+      uncovered.push({ id: i.id, name: i.name, value: i.value, reason });
+      continue;
+    }
+    perProduct[i.id] = perf;
+    bySource[perf.source]++;
+    applied += perf.applied;
+    withdrawn += perf.withdrawn;
+    current += perf.current;
+    profitNet += perf.profitNet;
+    coveredValue += i.value;
+  }
+  const profit = r2(current + withdrawn - applied);
+  return {
+    applied: r2(applied),
+    withdrawn: r2(withdrawn),
+    current: r2(current),
+    profit,
+    profitNet: r2(profitNet),
+    rate: applied > 0 ? profit / applied : null,
+    totalValue: r2(totalValue),
+    coveredValue: r2(coveredValue),
+    coverage: totalValue > 0 ? coveredValue / totalValue : 0,
+    productsCovered: Object.keys(perProduct).length,
+    productsTotal: active.length,
+    bySource,
+    uncovered: uncovered.sort((a, b) => b.value - a.value),
+    informed12m: r12Value > 0 ? { rate: r12Weighted / r12Value, coverage: totalValue > 0 ? r12Value / totalValue : 0 } : null,
+    perProduct,
+  };
+}
+
 // ------------------------------------------------------------------ receitas, despesas, fluxo
 
 /** Transações que entram no fluxo de caixa (exclui transferências próprias, pagamento de fatura, investimentos e ignoradas). */
@@ -344,6 +517,74 @@ export function calculateCashFlow(
     else b.expenses += -t.amount;
   }
   return [...buckets.values()].map((b) => ({ ...b, income: r2(b.income), expenses: r2(b.expenses), net: r2(b.income - b.expenses) }));
+}
+
+/** Períodos do Fluxo de Caixa (calendário): mês, trimestre, ano ou todo o histórico disponível. */
+export type CashFlowPeriodKind = 'month' | 'quarter' | 'year' | 'all';
+
+export interface CashFlowPeriod {
+  kind: CashFlowPeriodKind;
+  start: DateKey;
+  /** Último dia considerado (nunca depois de hoje). */
+  end: DateKey;
+  /** Agrupamento do gráfico escolhido para o período. */
+  granularity: Granularity;
+  /** Ano/mês/trimestre para rótulos. */
+  year: number;
+  month: number;
+  quarter: number;
+  /** Período ainda em andamento (termina hoje). */
+  ongoing: boolean;
+  canPrev: boolean;
+  canNext: boolean;
+}
+
+/**
+ * Resolve o período do Fluxo de Caixa. `offset` = quantos períodos para trás (0 = atual, −1 = anterior…).
+ * `dataStart` = data do lançamento mais antigo disponível (limita a navegação para trás).
+ */
+export function resolveCashFlowPeriod(kind: CashFlowPeriodKind, offset: number, today: DateKey, dataStart: DateKey | null): CashFlowPeriod {
+  const t = { y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) };
+  const clampEnd = (d: DateKey) => (d > today ? today : d);
+  const first = dataStart && dataStart < today ? dataStart : addMonths(today, -12);
+  if (kind === 'all') {
+    const months = diffDays(first, today) / 30.4;
+    return { kind, start: first, end: today, granularity: months > 36 ? 'year' : 'month', year: t.y, month: t.m, quarter: Math.floor((t.m - 1) / 3) + 1, ongoing: true, canPrev: false, canNext: false };
+  }
+  let start: DateKey;
+  let rawEnd: DateKey;
+  let granularity: Granularity;
+  if (kind === 'month') {
+    start = addMonths(`${today.slice(0, 7)}-01`, offset);
+    rawEnd = monthEnd(start);
+    granularity = 'day';
+  } else if (kind === 'quarter') {
+    const q0 = Math.floor((t.m - 1) / 3);
+    const idx = t.y * 4 + q0 + offset;
+    const y = Math.floor(idx / 4);
+    const q = idx - y * 4;
+    start = `${y}-${String(q * 3 + 1).padStart(2, '0')}-01`;
+    rawEnd = monthEnd(addMonths(start, 2));
+    granularity = 'week';
+  } else {
+    start = `${t.y + offset}-01-01`;
+    rawEnd = `${t.y + offset}-12-31`;
+    granularity = 'month';
+  }
+  const y = Number(start.slice(0, 4));
+  const m = Number(start.slice(5, 7));
+  return {
+    kind,
+    start,
+    end: clampEnd(rawEnd),
+    granularity,
+    year: y,
+    month: m,
+    quarter: Math.floor((m - 1) / 3) + 1,
+    ongoing: rawEnd >= today,
+    canPrev: start > first,
+    canNext: offset < 0,
+  };
 }
 
 export interface CategoryShare {
@@ -742,6 +983,107 @@ export function calculateOpenBillsTotal(summaries: CardBillSummary[], base = BAS
   return r2(summaries.filter((s) => s.card.currency === base).reduce((s, x) => s + x.total, 0));
 }
 
+export interface OpenBillRow {
+  card: NormalizedCard;
+  /** Fatura do ciclo aberto (null quando o cartão não tem datas de fechamento/vencimento). */
+  total: number | null;
+  /** Previsão no ritmo atual (fatura + compras novas até o fechamento). */
+  paceForecast: number | null;
+  closing: DateKey | null;
+  due: DateKey | null;
+  estimated: boolean;
+  /** Participação no total (0..1) — só na moeda base. */
+  share: number;
+}
+
+export interface ClosedBillDue {
+  card: NormalizedCard;
+  due: DateKey;
+  /** Valor ainda não pago informado pela instituição. */
+  remaining: number;
+}
+
+export interface OpenBillsOverview {
+  /** Soma das faturas atuais (ciclo aberto) de todos os cartões na moeda base. */
+  total: number;
+  /** Soma das previsões no ritmo atual. */
+  paceTotal: number;
+  /** Uma linha por cartão (ordenada pelo vencimento; sem datas no fim). */
+  rows: OpenBillRow[];
+  /** Cartões com fatura calculada. */
+  withCycle: number;
+  /** Cartões sem datas (fatura não calculável). */
+  withoutCycle: number;
+  /** Primeiro vencimento entre as faturas abertas. */
+  nextDue: DateKey | null;
+  /** Faturas já fechadas, informadas pela instituição como não pagas e ainda a vencer. */
+  closedDue: ClosedBillDue[];
+  closedDueTotal: number;
+  /** Totais em outras moedas (não somados nem convertidos). */
+  others: Record<string, number>;
+}
+
+/**
+ * Visão consolidada das faturas: o total de todas as faturas abertas e o valor de cada cartão.
+ * Cada real aparece uma vez: fatura aberta = ciclo atual de cada cartão (as fechadas a pagar ficam à parte).
+ */
+export function calculateOpenBillsOverview(
+  cards: NormalizedCard[],
+  summaries: CardBillSummary[],
+  projections: Record<string, BillProjection>,
+  bills: NormalizedBill[],
+  today: DateKey,
+  base = BASE,
+): OpenBillsOverview {
+  const byCard = new Map(summaries.map((s) => [s.card.id, s]));
+  let total = 0;
+  let paceTotal = 0;
+  const others: Record<string, number> = {};
+  const rows: OpenBillRow[] = cards.map((card) => {
+    const s = byCard.get(card.id);
+    const p = projections[card.id];
+    if (!s) return { card, total: null, paceForecast: null, closing: null, due: null, estimated: false, share: 0 };
+    if (card.currency === base) {
+      total += s.total;
+      paceTotal += p?.paceForecast ?? s.total;
+    } else {
+      others[card.currency] = r2((others[card.currency] ?? 0) + s.total);
+    }
+    return { card, total: s.total, paceForecast: p?.paceForecast ?? null, closing: s.cycle.closing, due: s.cycle.due, estimated: s.cycle.estimated, share: 0 };
+  });
+  for (const r of rows) r.share = r.total !== null && r.card.currency === base && total > 0 ? r.total / total : 0;
+  rows.sort((a, b) => {
+    if (a.due === null || b.due === null) return a.due === null ? (b.due === null ? 0 : 1) : -1;
+    return a.due.localeCompare(b.due) || (b.total ?? 0) - (a.total ?? 0);
+  });
+  const nextDue = rows.find((r) => r.due && r.card.currency === base && (r.total ?? 0) > 0)?.due ?? rows.find((r) => r.due)?.due ?? null;
+
+  // Fechadas a pagar: só com dados da própria instituição (faturas antes do mês da fatura aberta).
+  const openMonthOf = new Map(summaries.map((s) => [s.card.id, monthKey(s.cycle.due)]));
+  const cardById = new Map(cards.map((c) => [c.id, c]));
+  const closedDue: ClosedBillDue[] = [];
+  for (const b of bills) {
+    const card = cardById.get(b.cardId);
+    if (!card || b.isPaid || b.currency !== base || b.dueDate < today) continue;
+    const om = openMonthOf.get(b.cardId);
+    if (om && monthKey(b.dueDate) >= om) continue;
+    const remaining = r2(b.totalAmount - b.paidAmount);
+    if (remaining > 0) closedDue.push({ card, due: b.dueDate, remaining });
+  }
+  closedDue.sort((a, b) => a.due.localeCompare(b.due));
+  return {
+    total: r2(total),
+    paceTotal: r2(paceTotal),
+    rows,
+    withCycle: rows.filter((r) => r.total !== null).length,
+    withoutCycle: rows.filter((r) => r.total === null).length,
+    nextDue,
+    closedDue,
+    closedDueTotal: r2(closedDue.reduce((s, c) => s + c.remaining, 0)),
+    others,
+  };
+}
+
 // ------------------------------------------------------------------ projeção de saldo
 
 export type ProjectionEventKind = 'income' | 'expense' | 'bill';
@@ -886,6 +1228,97 @@ export function reconstructBalanceHistory(accounts: NormalizedAccount[], transac
     bal -= byDay.get(d) ?? 0;
   }
   return out;
+}
+
+export interface NetWorthHistoryPoint {
+  date: DateKey;
+  /** Saldo das contas reconstruído pelas transações (exato no trecho coberto). */
+  accounts: number | null;
+  /** Patrimônio líquido registrado pelo app neste dia (só existe nos dias sincronizados). */
+  netWorth: number | null;
+  investments: number | null;
+  cardDebt: number | null;
+}
+
+export interface NetWorthHistory {
+  points: NetWorthHistoryPoint[];
+  /** A partir desta data o saldo das contas é reconstruído com TODAS as transações das contas incluídas. */
+  accountsFrom: DateKey | null;
+  /** Contas sem nenhuma transação disponível (ficam fora da reconstrução para não inventar histórico). */
+  excludedAccounts: number;
+  includedAccounts: number;
+  recordedCount: number;
+  firstRecorded: DateKey | null;
+  /** Variação do saldo das contas no trecho reconstruído. */
+  accountsChange: { from: DateKey; start: number; end: number; change: number } | null;
+  /** Variação do patrimônio entre o primeiro e o último registro. */
+  recordedChange: { from: DateKey; to: DateKey; start: number; end: number; change: number } | null;
+}
+
+/**
+ * Patrimônio ao longo do tempo, SÓ com dados confiáveis (a Pluggy não fornece histórico de patrimônio):
+ *  - saldo das contas: reconstruído de trás para frente a partir do saldo atual e das transações. É exato a partir
+ *    da primeira transação disponível de cada instituição (antes disso não há como saber o que aconteceu);
+ *  - patrimônio líquido (contas + investimentos − dívidas): somente nos dias em que o app registrou os valores
+ *    informados pelas instituições. Investimentos e dívidas de cartão NÃO são reconstruídos — a Pluggy não informa
+ *    o valor passado dos investimentos, e estimá-lo mostraria um histórico que não aconteceu.
+ */
+export function calculateNetWorthHistory(
+  accounts: NormalizedAccount[],
+  transactions: NormalizedTransaction[],
+  snapshots: NetWorthSnapshot[],
+  today: DateKey,
+  opts: { stepDays?: number; maxDays?: number; base?: string } = {},
+): NetWorthHistory {
+  const { stepDays = 7, maxDays = 365, base = BASE } = opts;
+  const windowStart = addDays(today, -maxDays);
+  const baseAccounts = accounts.filter((a) => a.currency === base);
+  const accItem = new Map(baseAccounts.map((a) => [a.id, a.itemId]));
+  const itemStart = new Map<string, DateKey>();
+  for (const t of transactions) {
+    if (t.source !== 'bank' || !t.accountId || t.status !== 'posted' || t.date > today) continue;
+    const item = accItem.get(t.accountId);
+    if (!item) continue;
+    const cur = itemStart.get(item);
+    if (!cur || t.date < cur) itemStart.set(item, t.date);
+  }
+  const included = baseAccounts.filter((a) => itemStart.has(a.itemId));
+  let accountsFrom: DateKey | null = null;
+  for (const d of itemStart.values()) if (!accountsFrom || d > accountsFrom) accountsFrom = d;
+  if (accountsFrom && accountsFrom < windowStart) accountsFrom = windowStart;
+  if (accountsFrom && accountsFrom > today) accountsFrom = today;
+
+  const daily = new Map<DateKey, number>();
+  if (included.length && accountsFrom) for (const p of reconstructBalanceHistory(included, transactions, accountsFrom, today, base)) daily.set(p.date, p.balance);
+
+  const snaps = snapshots.filter((s) => s.currency === base && s.date >= windowStart && s.date <= today).sort((a, b) => a.date.localeCompare(b.date));
+  const dates = new Set<DateKey>(snaps.map((s) => s.date));
+  if (accountsFrom) {
+    for (let d = today, guard = 0; d >= accountsFrom && guard < 400; d = addDays(d, -stepDays), guard++) dates.add(d);
+    dates.add(accountsFrom);
+  }
+  const snapByDate = new Map(snaps.map((s) => [s.date, s]));
+  const points: NetWorthHistoryPoint[] = [...dates]
+    .sort()
+    .map((date) => {
+      const s = snapByDate.get(date);
+      return { date, accounts: daily.get(date) ?? null, netWorth: s ? s.netWorth : null, investments: s ? s.investments : null, cardDebt: s ? s.cardDebt : null };
+    });
+
+  const firstAcc = accountsFrom ? daily.get(accountsFrom) : undefined;
+  const lastAcc = daily.get(today);
+  const first = snaps[0];
+  const last = snaps[snaps.length - 1];
+  return {
+    points,
+    accountsFrom: included.length ? accountsFrom : null,
+    excludedAccounts: baseAccounts.length - included.length,
+    includedAccounts: included.length,
+    recordedCount: snaps.length,
+    firstRecorded: first?.date ?? null,
+    accountsChange: accountsFrom && firstAcc !== undefined && lastAcc !== undefined && accountsFrom < today ? { from: accountsFrom, start: firstAcc, end: lastAcc, change: r2(lastAcc - firstAcc) } : null,
+    recordedChange: first && last && first.date < last.date ? { from: first.date, to: last.date, start: first.netWorth, end: last.netWorth, change: r2(last.netWorth - first.netWorth) } : null,
+  };
 }
 
 export function calculateNetWorthGrowth(snapshots: NetWorthSnapshot[], currentNetWorth: number, today: DateKey, periodDays: number): { from: DateKey; startValue: number; change: number; pct: number | null } | null {

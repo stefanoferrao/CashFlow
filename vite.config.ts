@@ -31,7 +31,8 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://api.pluggy.ai https://*.pluggy.ai",
+  // api.github.com: somente a tela "Notas de Atualização" (Releases públicas do repositório), sob demanda.
+  "connect-src 'self' https://api.pluggy.ai https://*.pluggy.ai https://api.github.com",
   "frame-src https://connect.pluggy.ai https://*.pluggy.ai",
   "worker-src 'self'",
   "manifest-src 'self'",

@@ -12,7 +12,9 @@ import {
   type CategoryShare,
   type CreditUtilization,
   type CurrencyTotals,
+  type InvestmentPerformanceSummary,
   type NetWorth,
+  type OpenBillsOverview,
   type PeriodTotals,
   type ProjectionEvent,
   buildProjectionEvents,
@@ -22,10 +24,11 @@ import {
   calculateCreditUtilization,
   calculateCurrentBills,
   calculateInvestmentBreakdown,
-  calculateInvestmentReturn,
+  calculateInvestmentPerformance,
   calculateMonthOutlook,
   calculateNetWorth,
   calculateNetWorthGrowth,
+  calculateOpenBillsOverview,
   calculatePeriodTotals,
   calculateProjectedBill,
   calculateSavingsRate,
@@ -45,10 +48,13 @@ export interface Analytics {
   credit: CreditUtilization;
   allocation: { total: number; slices: AllocationSlice[] };
   investmentBreakdown: ReturnType<typeof calculateInvestmentBreakdown>;
-  investmentReturn: ReturnType<typeof calculateInvestmentReturn>;
+  /** Rendimento da carteira: aplicado × valor atual, só com base confiável (ver calculateInvestmentPerformance). */
+  investmentPerformance: InvestmentPerformanceSummary;
   bills: CardBillSummary[];
   billProjections: Record<string, BillProjection>;
   openBillsTotal: number;
+  /** Todas as faturas abertas somadas + o valor de cada cartão. */
+  openBills: OpenBillsOverview;
   month: PeriodTotals;
   /** Mesmo intervalo de dias do mês anterior (comparação justa). */
   previousMonthToDate: PeriodTotals;
@@ -111,10 +117,11 @@ export function computeAnalytics(
     credit: calculateCreditUtilization(ds.cards),
     allocation: calculateAssetAllocation(ds.accounts, ds.investments),
     investmentBreakdown: calculateInvestmentBreakdown(ds.investments),
-    investmentReturn: calculateInvestmentReturn(ds.investments),
+    investmentPerformance: calculateInvestmentPerformance(ds.investments, today),
     bills,
     billProjections,
     openBillsTotal: Math.round(bills.filter((b) => b.card.currency === 'BRL').reduce((s, b) => s + b.total, 0) * 100) / 100,
+    openBills: calculateOpenBillsOverview(ds.cards, bills, billProjections, ds.bills, today),
     month,
     previousMonthToDate,
     outlook,

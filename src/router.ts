@@ -25,6 +25,7 @@ export const ROUTES: Record<string, Loader> = {
   analises: () => import('./pages/insights'),
   configuracoes: () => import('./pages/settings'),
   privacidade: () => import('./pages/privacy'),
+  novidades: () => import('./pages/releases'),
 };
 
 export function parseHash(hash = location.hash): { path: string; params: URLSearchParams } {

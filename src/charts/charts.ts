@@ -180,6 +180,8 @@ export interface LineSeries {
   fill?: boolean;
   /** Tracejado — reservado para PROJEÇÕES. */
   projection?: boolean;
+  /** Mostra os pontos (valores registrados em datas esparsas) e liga os pontos pulando os vazios. */
+  points?: boolean;
 }
 
 export function lineChart(labels: string[], series: LineSeries[], opts: { yFormat?: ValueFormat; beginAtZero?: boolean; maxTicksX?: number; zeroLine?: boolean } = {}): Builder {
@@ -197,12 +199,15 @@ export function lineChart(labels: string[], series: LineSeries[], opts: { yForma
         borderCapStyle: 'round',
         borderJoinStyle: 'round',
         tension: 0.32,
-        pointRadius: 0,
+        pointRadius: s.points ? 3 : 0,
+        pointBackgroundColor: color,
+        pointBorderColor: t.surface,
+        pointBorderWidth: s.points ? 1.5 : 0,
         pointHoverRadius: 5,
         pointHoverBorderWidth: 2,
         pointHoverBorderColor: t.surface,
         pointHoverBackgroundColor: color,
-        spanGaps: false,
+        spanGaps: !!s.points,
       };
     });
     const base = baseOptions(t, { yFormat: opts.yFormat, beginAtZero: opts.beginAtZero ?? false, maxTicksX: opts.maxTicksX });

@@ -12,6 +12,9 @@ import { reconstructBalanceHistory } from '../services/financialCalculator';
 import * as actions from '../state/actions';
 import { store } from '../state/store';
 import { addDays } from '../utils/dates';
+import { APP_CONFIG } from '../config/app.config';
+
+const meuPluggyId = APP_CONFIG.pluggy.meuPluggyConnectorId;
 import { formatDate, formatDateTime, formatMoney, formatRelative, formatShortDate } from '../utils/format';
 import { analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, noDataState, onDataChange, openAddInstitution, tableToggle } from './shared';
 
@@ -53,6 +56,7 @@ export function mount(ctx: PageContext): () => void {
     const itemIds = demo ? ds.items.map((i) => i.id) : Array.from(new Set([...s.itemIds, ...ds.items.map((i) => i.id)]));
     const syncingAll = s.sync.status === 'syncing';
     const unidentified = ds.items.filter((i) => i.institution.identitySource === 'unidentified');
+    const dupIds = new Map((ds.duplicates ?? []).map((d) => [d.itemId, d.duplicateOf]));
 
     render(
       root,
@@ -91,6 +95,10 @@ export function mount(ctx: PageContext): () => void {
 
         <section class="section">
           <div class="section__head"><h2 class="section__title">Instituições</h2><span class="muted" style="font-size:13px">${itemIds.length} conectada(s)</span></div>
+          ${dupIds.size
+            ? html`<div class="callout callout--warn">${icon('alert')}<div><strong>${dupIds.size === 1 ? '1 conexão repetida encontrada.' : `${dupIds.size} conexões repetidas encontradas.`}</strong> Elas têm as mesmas contas e cartões de outra conexão mais recente e foram <strong>desconsideradas nos totais</strong> (para não somar o mesmo dinheiro duas vezes). Isso acontece quando a mesma conta é conectada mais de uma vez.
+                <div class="row wrap" style="margin-top:8px"><button type="button" class="btn btn--secondary btn--sm" data-action="remove-duplicates">${icon('trash')}Remover repetidas</button></div></div></div>`
+            : ''}
           ${unidentified.length
             ? html`<div class="callout callout--warn">${icon('info')}<div><strong>${unidentified.length === 1 ? '1 conexão do Meu Pluggy sem banco identificado.' : `${unidentified.length} conexões do Meu Pluggy sem banco identificado.`}</strong> O Meu Pluggy não informa o banco de origem. Use <strong>Personalizar</strong> para dar nome, logo e cor — eles passam a valer em todo o app.</div></div>`
             : ''}
@@ -113,6 +121,7 @@ export function mount(ctx: PageContext): () => void {
                   </div>
                 </div>
                 <div class="row wrap">
+                  ${dupIds.has(id) ? badge('Repetida · fora dos totais', 'warn', 'alert') : ''}
                   ${src === 'unidentified' ? badge('Banco não identificado', 'warn', 'alert') : ''}
                   ${itemStatusBadge(item, syncingAll)}
                   ${item ? html`<button type="button" class="btn btn--secondary btn--sm" data-action="edit-identity" data-value="${id}">${icon('palette')}Personalizar</button>` : ''}
@@ -124,7 +133,9 @@ export function mount(ctx: PageContext): () => void {
                           ${item ? html`<button type="button" class="menu__item" role="menuitem" data-action="edit-identity" data-value="${id}">${icon('palette')}Personalizar nome e aparência</button>` : ''}
                           <button type="button" class="menu__item" role="menuitem" data-action="item-sync" data-value="${id}">${icon('refresh')}Atualizar dados</button>
                           <button type="button" class="menu__item" role="menuitem" data-action="item-refresh" data-value="${id}">${icon('zap')}Solicitar coleta na instituição</button>
-                          <button type="button" class="menu__item" role="menuitem" data-action="item-reconnect" data-value="${id}">${icon('plug')}Reconectar</button>
+                          ${item && item.institution.connectorId === meuPluggyId
+                            ? html`<a class="menu__item" role="menuitem" href="https://meu.pluggy.ai" target="_blank" rel="noopener noreferrer">${icon('external')}Reconectar no Meu Pluggy</a>`
+                            : html`<button type="button" class="menu__item" role="menuitem" data-action="item-reconnect" data-value="${id}">${icon('plug')}Reconectar</button>`}
                           <div class="menu__sep"></div>
                           <button type="button" class="menu__item" role="menuitem" data-action="item-remove" data-value="${id}">${icon('trash')}Remover deste navegador</button>
                         </div>
@@ -153,7 +164,7 @@ export function mount(ctx: PageContext): () => void {
                       <div class="account-row__value ${acc.balance < 0 ? 'neg' : ''}">${money(acc.balance, { currency: acc.currency })}</div>
                     </div>`,
                   )
-                : html`<div class="account-row"><span class="muted">${item ? 'Nenhuma conta bancária neste item.' : 'Use "Atualizar agora" para baixar os dados.'}</span></div>`}
+                : html`<div class="account-row"><span class="muted">${dupIds.has(id) ? 'Conexão repetida: as contas dela aparecem na conexão mais recente e não são somadas de novo.' : item ? 'Nenhuma conta bancária neste item.' : 'Use "Atualizar agora" para baixar os dados.'}</span></div>`}
               <div class="card__foot" style="padding:12px 24px;border-top:1px solid var(--border)">
                 <span>${item?.lastUpdatedAt ? `Coleta da Pluggy: ${formatDateTime(item.lastUpdatedAt)}` : 'Sem coleta registrada'}</span>
                 <span>${item?.nextAutoSyncAt ? `Próxima coleta automática: ${formatShortDate(item.nextAutoSyncAt.slice(0, 10))}` : item?.consentExpiresAt ? `Consentimento até ${formatShortDate(item.consentExpiresAt.slice(0, 10))}` : ''}</span>
@@ -190,6 +201,17 @@ export function mount(ctx: PageContext): () => void {
         menu.setAttribute('data-open', 'true');
         menu.querySelector<HTMLElement>('.menu__item')?.focus();
       }
+    },
+    'remove-duplicates': async () => {
+      const ids = (store.state.dataset.duplicates ?? []).map((d) => d.itemId);
+      if (!ids.length) return;
+      const ok = await confirmDialog({
+        title: 'Remover conexões repetidas',
+        message: `${ids.length === 1 ? 'A conexão repetida será removida' : `As ${ids.length} conexões repetidas serão removidas`} deste navegador e excluída(s) na Pluggy — a conexão mais recente, com as mesmas contas, continua funcionando normalmente.`,
+        confirmLabel: 'Remover repetidas',
+        danger: true,
+      });
+      if (ok) await actions.removeDuplicateItems(ids, true);
     },
     'item-sync': (el) => {
       closeMenus();

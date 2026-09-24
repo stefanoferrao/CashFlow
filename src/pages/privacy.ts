@@ -9,7 +9,7 @@ export function privacyPoints(): SafeHtml {
   const items: Array<[string, string, string]> = [
     ['database', 'Não possuímos backend próprio', 'O CashFlow é um aplicativo estático: todo o processamento acontece no seu navegador. Não existe servidor do CashFlow recebendo dados.'],
     ['lock', 'Credenciais ficam localmente', 'Client ID e Client Secret são cifrados (AES-GCM 256) com uma chave derivada da sua senha local (PBKDF2-SHA256, 600 mil iterações) e guardados no IndexedDB deste navegador.'],
-    ['shield', 'Seus dados não são vendidos', 'Não há anúncios, analytics, telemetria nem terceiros recebendo dados. O único destino das requisições é a API oficial da Pluggy.'],
+    ['shield', 'Seus dados não são vendidos', 'Não há anúncios, analytics, telemetria nem terceiros recebendo dados. Seus dados financeiros só trafegam entre este navegador e a API oficial da Pluggy. A tela Notas de Atualização consulta as Releases públicas do GitHub, só quando é aberta e sem enviar nenhum dado seu.'],
     ['external', 'Nada é enviado ao "nosso servidor"', 'As chamadas vão diretamente do navegador para api.pluggy.ai. O widget Pluggy Connect é carregado do CDN oficial da Pluggy somente quando você conecta uma instituição.'],
     ['key', 'Você controla as credenciais', 'Você pode trocar, testar ou remover as credenciais a qualquer momento. Recomendamos uma aplicação Pluggy dedicada, para poder rotacionar o Secret.'],
     ['trash', 'Você pode apagar tudo', 'Em Configurações → Segurança, "Apagar todos os dados locais" remove credenciais, cache financeiro, categorização e layout deste navegador.'],
