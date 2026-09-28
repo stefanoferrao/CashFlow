@@ -3,6 +3,7 @@
  * A UI nunca toca nos tipos da Pluggy. Dados pessoais desnecessários (CPF, nome do titular,
  * dados de pagador/recebedor, número completo da conta) são descartados aqui.
  */
+import { APP_CONFIG } from '../config/app.config';
 import {
   type FinancialDataset,
   type InvestmentClass,
@@ -28,6 +29,7 @@ import {
   isCardPayment,
   isSamePersonTransfer,
 } from './categories';
+import { resolveCardLimits } from './creditLimits';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -116,11 +118,23 @@ export function normalizeAccount(acc: PluggyAccount, institution: string, update
   };
 }
 
-export function normalizeCard(acc: PluggyAccount, institution: string, color: string | null, isOpenFinance: boolean, updatedAt: string | null): NormalizedCard {
+/**
+ * `openFinanceData`: os dados vêm do Open Finance (conector Open Finance ou Meu Pluggy). Nesse caso o `balance` do cartão é o
+ * limite utilizado — ver services/creditLimits.ts. Sem informar, vale `isOpenFinance`.
+ */
+export function normalizeCard(
+  acc: PluggyAccount,
+  institution: string,
+  color: string | null,
+  isOpenFinance: boolean,
+  updatedAt: string | null,
+  openFinanceData: boolean = isOpenFinance,
+): NormalizedCard {
   const cd = acc.creditData;
-  const limit = cd?.creditLimit ?? null;
-  const available = cd?.availableCreditLimit ?? null;
-  const used = limit !== null && available !== null ? round2(Math.max(0, limit - available)) : null;
+  const lim = resolveCardLimits(cd, acc.balance ?? 0, { itemId: acc.itemId, openFinanceData: openFinanceData || !!cd?.disaggregatedCreditLimits?.length });
+  const limit = lim.limit;
+  const available = lim.available;
+  const used = lim.used;
   return {
     id: acc.id,
     itemId: acc.itemId,
@@ -135,6 +149,9 @@ export function normalizeCard(acc: PluggyAccount, institution: string, color: st
     availableLimit: available,
     usedLimit: used,
     institutionBalance: round2(acc.balance ?? 0),
+    limitSource: lim.source,
+    limitNote: lim.note,
+    sharedLimitKey: lim.sharedKey,
     minimumPayment: cd?.minimumPayment ?? null,
     closingDate: apiDateToKey(cd?.balanceCloseDate ?? null),
     dueDate: apiDateToKey(cd?.balanceDueDate ?? null),
@@ -323,6 +340,12 @@ export function normalizeInvestment(inv: PluggyInvestment, fallbackInstitution: 
   };
 }
 
+/**
+ * Versão do formato/cálculo dos dados normalizados guardados no cache. Subiu para 2 quando o cálculo do limite dos
+ * cartões mudou (services/creditLimits.ts): dados guardados por versões anteriores são baixados de novo ao abrir o app.
+ */
+export const DATA_MODEL_VERSION = 2;
+
 export interface NormalizedItemData {
   item: NormalizedItem;
   accounts: NormalizedAccount[];
@@ -332,6 +355,8 @@ export interface NormalizedItemData {
   investments: NormalizedInvestment[];
   warnings: string[];
   fetchedAt: string;
+  /** Ausente nos dados guardados antes da versão 2. */
+  modelVersion?: number;
 }
 
 export function normalizeBundle(bundle: RawItemBundle, resolver: CategoryResolver): NormalizedItemData {
@@ -345,7 +370,7 @@ export function normalizeBundle(bundle: RawItemBundle, resolver: CategoryResolve
 
   for (const acc of bundle.accounts) {
     const source = acc.type === 'CREDIT' ? 'card' : 'bank';
-    if (source === 'card') cards.push(normalizeCard(acc, inst.name, inst.primaryColor, inst.isOpenFinance, updatedAt));
+    if (source === 'card') cards.push(normalizeCard(acc, inst.name, inst.primaryColor, inst.isOpenFinance, updatedAt, inst.isOpenFinance || inst.connectorId === APP_CONFIG.pluggy.meuPluggyConnectorId));
     else accounts.push(normalizeAccount(acc, inst.name, updatedAt));
     for (const tx of bundle.transactionsByAccount[acc.id] ?? []) {
       const n = normalizeTransaction(tx, { source, accountId: acc.id, accountCurrency: acc.currencyCode || 'BRL', itemId: acc.itemId, institution: inst.name, resolver });
@@ -357,7 +382,7 @@ export function normalizeBundle(bundle: RawItemBundle, resolver: CategoryResolve
     }
   }
   const investments = bundle.investments.map((i) => normalizeInvestment(i, inst.name, bundle.investmentTransactions?.[i.id] ?? null));
-  return { item, accounts, cards, bills, transactions, investments, warnings: bundle.warnings, fetchedAt: new Date().toISOString() };
+  return { item, accounts, cards, bills, transactions, investments, warnings: bundle.warnings, fetchedAt: new Date().toISOString(), modelVersion: DATA_MODEL_VERSION };
 }
 
 const normText = (s: string) =>

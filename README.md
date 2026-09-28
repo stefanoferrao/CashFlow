@@ -232,7 +232,7 @@ Como isso pode mudar sem aviso, o cliente distingue em tempo de execução **blo
 Definido em `src/models/finance.ts`. Os campos vêm **somente** do que a Pluggy documenta (ver auditoria); nada é inventado.
 
 - **NormalizedAccount** — conta bancária: instituição, nome, número mascarado, saldo, moeda, cheque especial (quando informado).
-- **NormalizedCard** — cartão: bandeira, nível, final, limite total, disponível, **utilizado = limite − disponível**, fechamento e vencimento informados, saldo informado pela instituição.
+- **NormalizedCard** — cartão: bandeira, nível, final, limite total, disponível, **utilizado** (ver abaixo), fechamento e vencimento informados, saldo informado pela instituição.
 - **NormalizedTransaction** — valor com sinal do ponto de vista do usuário (+ entrada / − saída), `kind`, categoria/subcategoria, parcela `n/total`, previsão de fatura (`billForecastDate`), status (`posted`/`pending`). Nome e CPF/CNPJ do titular e dados de pagador/recebedor **não** são guardados (só o meio de pagamento, ex.: PIX).
 - **NormalizedBill** — fatura fechada: fechamento, vencimento, total, mínimo, pagamentos.
 - **NormalizedInvestment** — classe (renda fixa, fundos, ações, ETFs, previdência, outros), valor líquido e bruto, valor original, lucro, vencimento, taxas **somente** quando informadas.
@@ -265,7 +265,8 @@ Todos em `src/services/financialCalculator.ts` (funções puras, com testes):
 | `calculateTotalBalance` | Soma **apenas** saldos de contas bancárias na moeda base |
 | `calculateTotalInvestments` | Soma o valor líquido dos investimentos ativos |
 | `calculateNetWorth` | (contas com saldo positivo + investimentos) − (dívida de cartões + cheque especial usado). Limite de cartão **não** é patrimônio; fatura **não** é ativo |
-| `calculateCreditUtilization` | Limite total, utilizado, disponível e % — só com cartões que informam limite |
+| `resolveCardLimits` (`creditLimits.ts`) | **Limite utilizado do cartão**, nesta ordem: linha de limite **total** informada pela instituição (Open Finance); em dados Open Finance/Meu Pluggy, o **saldo do cartão** (a documentação da Pluggy o define como o limite utilizado), com aviso quando o "disponível" informado não bate; nos demais conectores, limite − disponível |
+| `calculateCreditUtilization` | Limite total, utilizado, disponível e % — só com cartões que informam limite; cartões que dividem o mesmo limite (linha consolidada) contam uma vez |
 | `calculateCurrentBills` | Fatura aberta **calculada** a partir das transações do ciclo (a Pluggy não fornece a fatura aberta em `/bills`) |
 | `calculateProjectedBill` | Previsão = lançado + parcelas futuras já conhecidas. "No ritmo atual" = previsão + média diária de compras novas × dias até o fechamento (parcelas antigas não entram na média) |
 | `calculateProjectedBalance` | Saldo atual + receitas previstas − despesas previstas − faturas, para 7/15/30/60/90 dias |

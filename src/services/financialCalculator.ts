@@ -73,7 +73,22 @@ export function calculateTotalInvestments(investments: NormalizedInvestment[], b
   return t;
 }
 
-/** Dívida atual de um cartão: limite utilizado (limite − disponível) ou, na falta dele, o saldo informado pela instituição. */
+/**
+ * Cartões que dividem o mesmo limite (linha de limite consolidada, informada pelo Open Finance) entram UMA vez nos totais
+ * de limite e de dívida: a Pluggy devolve os mesmos valores para cada cartão da linha, e somar todos contaria o mesmo
+ * dinheiro mais de uma vez. Cada cartão continua aparecendo individualmente.
+ */
+export function dedupeSharedLimits(cards: NormalizedCard[]): NormalizedCard[] {
+  const seen = new Set<string>();
+  return cards.filter((c) => {
+    if (!c.sharedLimitKey) return true;
+    if (seen.has(c.sharedLimitKey)) return false;
+    seen.add(c.sharedLimitKey);
+    return true;
+  });
+}
+
+/** Dívida atual de um cartão: limite utilizado (ver `limitSource`) ou, na falta dele, o saldo informado pela instituição. */
 export function cardDebt(card: NormalizedCard): number {
   if (card.usedLimit !== null) return card.usedLimit;
   return Math.max(0, card.institutionBalance);
@@ -108,7 +123,7 @@ export function calculateNetWorth(accounts: NormalizedAccount[], investments: No
   const inv = calculateTotalInvestments(investments, base);
   Object.keys(inv.others).forEach((c) => excluded.add(c));
   let debt = 0;
-  for (const c of cards) {
+  for (const c of dedupeSharedLimits(cards)) {
     if (c.currency !== base) {
       excluded.add(c.currency);
       continue;
@@ -144,7 +159,7 @@ export function calculateCreditUtilization(cards: NormalizedCard[], base = BASE)
   let available = 0;
   let withData = 0;
   let without = 0;
-  for (const c of cards) {
+  for (const c of dedupeSharedLimits(cards)) {
     if (c.currency !== base || c.limit === null || c.availableLimit === null || c.limit <= 0) {
       without++;
       continue;

@@ -208,7 +208,7 @@ test.describe('Notas de Atualização', () => {
     await startDemo(page, { github: 'ok' });
     await page.evaluate(() => (location.hash = '#/novidades'));
     await expect(page.locator('#page-title')).toHaveText('Notas de Atualização');
-    await expect(page.locator('.release').first()).toContainText('v1.2.0');
+    await expect(page.locator('.release').first()).toContainText('v1.3.0');
     await expect(page.locator('.release--current')).toContainText('Esta versão');
     await expect(page.locator('#v-1\\.0\\.2')).toContainText('228 logos');
     // corpo não confiável: nada executa, link javascript: não vira link
@@ -216,13 +216,13 @@ test.describe('Notas de Atualização', () => {
     await expect(page.locator('.release a[href^="javascript"]')).toHaveCount(0);
     // versão exibida em Configurações → Sobre
     await page.evaluate(() => (location.hash = '#/configuracoes'));
-    await expect(page.getByText('CashFlow 1.2.0')).toBeVisible();
+    await expect(page.getByText('CashFlow 1.3.0')).toBeVisible();
   });
 
   test('sem acesso ao GitHub mostra as notas desta versão embutidas no app', async ({ page }) => {
     await startDemo(page, { github: 'down' });
     await page.evaluate(() => (location.hash = '#/novidades'));
     await expect(page.locator('.callout--warn')).toBeVisible();
-    await expect(page.locator('.release--current')).toContainText('Fatura atual de todos os cartões');
+    await expect(page.locator('.release--current')).toContainText('Limite do cartão correto');
   });
 });

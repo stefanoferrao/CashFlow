@@ -66,12 +66,12 @@ export const NUBANK_LOGO = 'https://cdn.pluggy.ai/e2e-mock/nubank.svg';
 const json = (route: Route, status: number, body: unknown) =>
   route.fulfill({ status, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify(body) });
 
-function itemBody(id: string, meuPluggy: boolean) {
+function itemBody(id: string, meuPluggy: boolean, openFinance = true) {
   return {
     id,
     connector: meuPluggy
       ? { id: 200, name: 'MeuPluggy', primaryColor: 'ef294b', isOpenFinance: false, isSandbox: false, imageUrl: '' }
-      : { id: 201, name: 'Banco Mock', primaryColor: '0f766e', isOpenFinance: true, isSandbox: false, imageUrl: '' },
+      : { id: 201, name: 'Banco Mock', primaryColor: '0f766e', isOpenFinance: openFinance, isSandbox: false, imageUrl: '' },
     status: 'UPDATED',
     executionStatus: 'SUCCESS',
     statusDetail: null,
@@ -91,8 +91,13 @@ function itemBody(id: string, meuPluggy: boolean) {
  * `listItems`: comportamento de GET /v2/items — `enabled` devolve o Item e um Item de conector de teste; `forbidden`
  * responde 403 (recurso opt-in ainda não habilitado pela Pluggy); sem a opção, a rota não existe (404).
  * `delayMs`: atrasa todas as respostas da API (para observar a tela de carregamento); também vale mudar `state.delayMs` depois.
+ * `card`: limite, disponível e `balance` do cartão de crédito (padrão: 5.000 / 3.500 / 1.500).
+ * `openFinance`: o conector do Item (que não é o Meu Pluggy) é Open Finance? Padrão: sim; `false` simula um conector direto.
  */
-export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPluggy?: boolean; listItems?: 'enabled' | 'forbidden'; delayMs?: number } = {}): Promise<MockState> {
+export async function mockPluggy(
+  page: Page,
+  opts: { itemStatus?: number; meuPluggy?: boolean; listItems?: 'enabled' | 'forbidden'; delayMs?: number; card?: { limit: number; available: number; balance: number }; openFinance?: boolean } = {},
+): Promise<MockState> {
   const state: MockState = { authCalls: 0, cursorCalls: 0, requests: [], itemStatus: opts.itemStatus ?? 200, connectTokenBodies: [], delayMs: opts.delayMs ?? 0 };
   const mp = !!opts.meuPluggy;
   await page.route('https://cdn.pluggy.ai/e2e-mock/**', (route) =>
@@ -115,7 +120,7 @@ export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPlu
     if (url.pathname === '/v2/items' && opts.listItems === 'enabled') {
       return json(route, 200, {
         results: [
-          itemBody(ITEM_ID, mp),
+          itemBody(ITEM_ID, mp, opts.openFinance ?? true),
           { ...itemBody(SANDBOX_ITEM_ID, false), connector: { id: 8, name: 'Pluggy Bank', primaryColor: '000000', isOpenFinance: false, isSandbox: true, imageUrl: '' } },
         ],
         next: null,
@@ -123,7 +128,7 @@ export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPlu
     }
     if (url.pathname === `/items/${ITEM_ID}`) {
       if (state.itemStatus !== 200) return json(route, state.itemStatus, { code: state.itemStatus, codeDescription: 'ITEM_NOT_FOUND', message: 'Item not found' });
-      return json(route, 200, itemBody(ITEM_ID, mp));
+      return json(route, 200, itemBody(ITEM_ID, mp, opts.openFinance ?? true));
     }
     if (url.pathname === '/accounts') {
       return json(route, 200, {
@@ -152,7 +157,7 @@ export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPlu
             type: 'CREDIT',
             subtype: 'CREDIT_CARD',
             number: '4821',
-            balance: 1500,
+            balance: opts.card?.balance ?? 1500,
             name: mp ? 'TITULAR M SILVA' : 'Cartão Mock',
             marketingName: mp ? null : 'Mock Platinum',
             owner: mp ? 'Titular Mock Silva' : 'Titular Mock',
@@ -164,10 +169,10 @@ export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPlu
               brand: mp ? 'MASTERCARD' : 'VISA',
               balanceCloseDate: mp ? null : nextDay(25),
               balanceDueDate: mp ? null : nextDay(5),
-              availableCreditLimit: 3500,
+              availableCreditLimit: opts.card?.available ?? 3500,
               balanceForeignCurrency: null,
               minimumPayment: null,
-              creditLimit: 5000,
+              creditLimit: opts.card?.limit ?? 5000,
               isLimitFlexible: false,
               status: 'ACTIVE',
               holderType: 'MAIN',

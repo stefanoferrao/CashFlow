@@ -72,6 +72,26 @@ export interface PluggyBankData {
   reservedBalances?: Array<{ name: string | null; identification: string; availableAmounts: Array<{ amount: number; currencyCode: string }> }> | null;
 }
 
+/**
+ * Uma linha de crédito do cartão (Open Finance): o limite total ou o de uma modalidade, individual ou compartilhado
+ * entre cartões. Documentação: docs.pluggy.ai/docs/accounts → "Disaggregated Credit Limits".
+ */
+export interface PluggyDisaggregatedCreditLimit {
+  /** LIMITE_CREDITO_TOTAL (limite geral) ou LIMITE_CREDITO_MODALIDADE_OPERACAO (limite de uma modalidade). */
+  creditLineLimitType?: string | null;
+  /** INDIVIDUAL (só deste cartão) ou CONSOLIDADO (compartilhado com outros cartões/linhas). */
+  consolidationType?: string | null;
+  identificationNumber?: string | null;
+  /** CREDITO_A_VISTA, CREDITO_PARCELADO, saques, OUTROS… */
+  lineName?: string | null;
+  isLimitFlexible?: boolean | null;
+  limitAmount?: number | null;
+  customizedLimitAmount?: number | null;
+  usedAmount?: number | null;
+  /** Limite restante da linha (limitAmount − usedAmount). */
+  availableAmount?: number | null;
+}
+
 export interface PluggyCreditData {
   level: string | null;
   brand: string | null;
@@ -83,6 +103,8 @@ export interface PluggyCreditData {
   minimumPayment: number | null;
   creditLimit: number | null;
   isLimitFlexible: boolean | null;
+  /** Linhas de crédito detalhadas (Open Finance). Ausente em conectores que não informam. */
+  disaggregatedCreditLimits?: PluggyDisaggregatedCreditLimit[] | null;
   status: 'ACTIVE' | 'BLOCKED' | 'CANCELLED' | null;
   holderType: 'MAIN' | 'ADDITIONAL' | null;
 }

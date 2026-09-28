@@ -153,8 +153,9 @@ describe('normalizeCard', () => {
       holderType: 'MAIN',
     },
   };
-  it('calcula limite utilizado e descarta dados pessoais', () => {
-    const c = normalizeCard(acc, 'Banco', '#112233', true, null);
+  it('calcula limite utilizado (conector direto: limite − disponível) e descarta dados pessoais', () => {
+    // Conector direto: o `balance` é o saldo da fatura e não entra no limite utilizado (ver tests/unit/creditLimits.test.ts).
+    const c = normalizeCard(acc, 'Banco', '#112233', false, null);
     expect(c.usedLimit).toBe(5760);
     expect(c.lastFourDigits).toBe('4821');
     expect(c.closingDate).toBe('2026-09-28');

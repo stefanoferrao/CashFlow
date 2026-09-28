@@ -34,7 +34,7 @@ import { CategoryResolver } from '../services/categories';
 import { buildDemoDataset } from '../services/demoData';
 import { createSnapshot, calculateNetWorth, upsertSnapshot } from '../services/financialCalculator';
 import { applyIdentities, sanitizeIdentity, sanitizeProductLogo, toHexColor, validDay } from '../services/institutions';
-import { type NormalizedItemData, mergeItemData, normalizeBundle, normalizeItem } from '../services/financialDataService';
+import { DATA_MODEL_VERSION, type NormalizedItemData, mergeItemData, normalizeBundle, normalizeItem } from '../services/financialDataService';
 import { type UserConfig, buildUserConfig, mergeCategorization, mergeLabels, mergePlanned } from '../services/userConfig';
 import { deleteDatabase, isPersistent } from '../storage/db';
 import {
@@ -425,11 +425,12 @@ interface ItemRecord {
   data: Omit<NormalizedItemData, 'accounts' | 'cards' | 'bills' | 'transactions' | 'investments'> | null;
 }
 
-async function readItemParts(): Promise<{ ids: string[]; parts: NormalizedItemData[]; oldest: string | null }> {
+async function readItemParts(): Promise<{ ids: string[]; parts: NormalizedItemData[]; oldest: string | null; outdated: boolean }> {
   const records = await secureRepo.getAll<ItemRecord>('pluggy_items');
   records.sort((a, b) => a.value.addedAt.localeCompare(b.value.addedAt));
   const parts: NormalizedItemData[] = [];
   let oldest: string | null = null;
+  let outdated = false;
   for (const r of records) {
     const meta = r.value.data;
     if (!meta) continue;
@@ -449,13 +450,14 @@ async function readItemParts(): Promise<{ ids: string[]; parts: NormalizedItemDa
       investments: investments?.value ?? [],
     });
     if (!oldest || meta.fetchedAt < oldest) oldest = meta.fetchedAt;
+    if ((meta.modelVersion ?? 1) < DATA_MODEL_VERSION) outdated = true;
   }
-  return { ids: records.map((r) => r.id), parts, oldest };
+  return { ids: records.map((r) => r.id), parts, oldest, outdated };
 }
 
 /** Carrega o cache cifrado. Retorna true se estiver vazio ou desatualizado (deve sincronizar). */
 export async function loadCache(): Promise<boolean> {
-  const [{ ids, parts, oldest }, snaps, uc, planned, labels, connectors] = await Promise.all([
+  const [{ ids, parts, oldest, outdated }, snaps, uc, planned, labels, connectors] = await Promise.all([
     readItemParts(),
     secureRepo.get<NetWorthSnapshot[]>('snapshots', 'netWorth'),
     secureRepo.get<UserCategorization>('categories', 'user'),
@@ -473,7 +475,8 @@ export async function loadCache(): Promise<boolean> {
     planned: planned?.value ?? [],
     sync: { ...store.state.sync, lastSyncAt: oldest },
   });
-  if (!oldest) return true;
+  // Sem dados, ou guardados num formato/cálculo anterior (ex.: limite dos cartões): baixa de novo.
+  if (!oldest || outdated) return true;
   const ttl = store.state.preferences.cacheTtlHours * 3600_000;
   return Date.now() - new Date(oldest).getTime() > ttl;
 }

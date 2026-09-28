@@ -8,7 +8,7 @@ import { animateNumbers, delegate, html, render, type SafeHtml } from '../compon
 import { icon } from '../components/icons';
 import { badge, categoryIcon, categoryLabel, delta, infoTip, legend, money, na } from '../components/ui';
 import type { PageContext } from '../router';
-import { calculateNetWorthHistory, cardDebt } from '../services/financialCalculator';
+import { calculateNetWorthHistory, cardDebt, dedupeSharedLimits } from '../services/financialCalculator';
 import { diffDays } from '../utils/dates';
 import { store } from '../state/store';
 import { formatDate, formatMoney, formatMonthKey, formatMonthKeyShort, formatPercent, formatShortDate } from '../utils/format';
@@ -33,7 +33,7 @@ export function mount(ctx: PageContext): () => void {
     }
     const a = analytics();
     const ds = s.dataset;
-    const debts = ds.cards.filter((c) => c.currency === 'BRL').reduce((t, c) => t + cardDebt(c), 0);
+    const debts = dedupeSharedLimits(ds.cards).filter((c) => c.currency === 'BRL').reduce((t, c) => t + cardDebt(c), 0);
     const economy = a.month.income - a.month.expenses;
     const top = a.categoryMonth[0];
     const g = a.netWorthGrowth30;

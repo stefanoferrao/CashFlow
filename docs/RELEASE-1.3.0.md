@@ -1,15 +1,12 @@
-/**
- * Notas desta versão, embutidas no app. São exibidas em "Notas de Atualização" quando o GitHub não
- * responde (sem internet) ou enquanto a release ainda não foi publicada. O mesmo texto é usado na
- * release do GitHub (docs/RELEASE-1.3.0.md).
- */
-export const BUNDLED_RELEASE_NOTES = `Lançada em **28/09/2026**. Limite do cartão corrigido nos dados do Meu Pluggy / Open Finance, tela de carregamento ao atualizar, busca automática do Item ID, cópia das suas personalizações entre celular e computador e uma barra superior com cara de aplicativo.
+# Notas de Atualização — v1.3.0
+
+Lançada em **28/09/2026**. Limite do cartão corrigido nos dados do Meu Pluggy / Open Finance, tela de carregamento ao atualizar, busca automática do Item ID, cópia das suas personalizações entre celular e computador e uma barra superior com cara de aplicativo.
 
 ## Novidades
 
 ### Limite do cartão correto (Nubank e demais via Meu Pluggy / Open Finance)
 - O **limite utilizado** agora segue a documentação da Pluggy: nos dados do **Open Finance** (o Meu Pluggy é um deles) o **saldo do cartão é o limite utilizado**. Antes o app confiava só em "limite total − disponível" e, quando o *disponível* informado pela Pluggy não batia com o saldo, mostrava um uso muito maior que o real (ex.: **R$ 4.424,03 · 48,4%** num cartão com saldo de **R$ 418,73**).
-- Quando a instituição detalha as **linhas de limite** (\`disaggregatedCreditLimits\`), vale a **linha de limite total** informada por ela.
+- Quando a instituição detalha as **linhas de limite** (`disaggregatedCreditLimits`), vale a **linha de limite total** informada por ela.
 - No cartão, o app diz **de onde veio** o limite utilizado e, se a Pluggy informou algo diferente, mostra os dois valores num aviso — nada some em silêncio.
 - Cartões que **dividem o mesmo limite** (linha consolidada) entram **uma vez só** nos totais de limite, no patrimônio e nos insights. Cada cartão continua aparecendo com o seu limite.
 - Os dados guardados antes desta versão são **baixados de novo automaticamente** na próxima abertura, sem precisar lembrar de atualizar.
@@ -23,7 +20,7 @@ export const BUNDLED_RELEASE_NOTES = `Lançada em **28/09/2026**. Limite do cart
 
 ### Item ID encontrado sozinho
 - Depois de conectar a conta Pluggy, o app procura os **Items que já existem** na sua aplicação (Dashboard da Pluggy / Meu Pluggy) e adiciona os que ainda não estão aqui — sem copiar o Item ID. Ignora os conectores de teste e adiciona no máximo 20 de uma vez.
-- Esse recurso é **opcional na Pluggy** (\`GET /v2/items\` vem desabilitado até o suporte habilitar). Se não estiver ligado, o app avisa sem erro e o **"Tenho um Item ID"** continua funcionando como antes.
+- Esse recurso é **opcional na Pluggy** (`GET /v2/items` vem desabilitado até o suporte habilitar). Se não estiver ligado, o app avisa sem erro e o **"Tenho um Item ID"** continua funcionando como antes.
 
 ### Copie suas personalizações para outro aparelho
 - Em **Configurações → Segurança**: **Exportar arquivo**, **Copiar**, **Importar arquivo** e **Colar** (celular e computador). No celular, exportar abre a folha de compartilhar.
@@ -58,4 +55,4 @@ export const BUNDLED_RELEASE_NOTES = `Lançada em **28/09/2026**. Limite do cart
 1. Publique a nova versão (o GitHub Pages faz o build automaticamente).
 2. Abra o CashFlow e recarregue a página (ou toque em **Atualizar agora** no aviso de nova versão).
 3. Ao abrir, o app baixa os dados de novo para recalcular o **limite dos cartões**: aguarde a tela de carregamento terminar.
-4. Para levar suas personalizações do computador ao celular (ou o contrário), use **Configurações → Segurança → Exportar / Importar**.`;
+4. Para levar suas personalizações do computador ao celular (ou o contrário), use **Configurações → Segurança → Exportar / Importar**.

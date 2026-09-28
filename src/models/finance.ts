@@ -175,10 +175,16 @@ export interface NormalizedCard {
   currency: CurrencyCode;
   limit: number | null;
   availableLimit: number | null;
-  /** limit − availableLimit quando ambos existem. */
+  /** Limite utilizado (ver `limitSource`); em geral limit − availableLimit. */
   usedLimit: number | null;
   /** `balance` bruto da Pluggy (significado varia por tipo de conector — ver auditoria). */
   institutionBalance: number;
+  /** De onde veio o limite utilizado: linha de limite total (Open Finance), saldo do cartão ou limite − disponível. */
+  limitSource?: 'credit-line' | 'balance' | 'available' | null;
+  /** Diferença entre o que a Pluggy informou e o que o app usa para o limite (mostrada no cartão). */
+  limitNote?: string | null;
+  /** Limite compartilhado com outro cartão: mesma chave = mesmo limite, contado uma vez nos totais. */
+  sharedLimitKey?: string | null;
   minimumPayment: number | null;
   closingDate: DateKey | null;
   dueDate: DateKey | null;

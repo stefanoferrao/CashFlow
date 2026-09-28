@@ -50,6 +50,13 @@ function detail(label: string, value: SafeHtml | string, tip?: string): SafeHtml
   return html`<div class="detail"><span>${label}${tip ? html` ${infoTip(tip)}` : ''}</span><strong>${value}</strong></div>`;
 }
 
+/** Explica de onde veio o limite utilizado (ver services/creditLimits.ts). */
+function usedLimitTip(source: NormalizedCard['limitSource']): string {
+  if (source === 'credit-line') return 'Valor usado da linha de limite total informada pela instituição (Open Finance).';
+  if (source === 'balance') return 'Saldo do cartão informado pela instituição: em conectores Open Finance (como o Meu Pluggy) o saldo é o limite utilizado.';
+  return 'Limite total − disponível. Inclui parcelas futuras já comprometidas.';
+}
+
 export function mount(ctx: PageContext): () => void {
   const root = ctx.root;
 
@@ -115,7 +122,7 @@ export function mount(ctx: PageContext): () => void {
                   <div class="detail-grid">
                     ${detail('Limite total', money(card.limit, { currency: card.currency }))}
                     ${detail('Limite disponível', money(card.availableLimit, { currency: card.currency }))}
-                    ${detail('Limite utilizado', money(card.usedLimit, { currency: card.currency }), 'Limite total − disponível. Inclui parcelas futuras já comprometidas.')}
+                    ${detail('Limite utilizado', money(card.usedLimit, { currency: card.currency }), usedLimitTip(card.limitSource))}
                     ${detail('Percentual utilizado', u !== null ? formatPercent(u) : 'Não informado')}
                     ${detail('Melhor dia de compra', bestDay ? `Dia ${bestDay}` : 'Não informado', 'Estimado como o dia seguinte ao fechamento da fatura aberta.')}
                     ${detail('Fechamento', summary ? html`${formatDate(summary.cycle.closing)}${cycleBadge}` : 'Não informado')}
@@ -123,9 +130,11 @@ export function mount(ctx: PageContext): () => void {
                     ${detail('Fatura atual', summary ? money(summary.total, { currency: card.currency }) : 'Não disponível', 'Compras e estornos do ciclo aberto + parcelas previstas de compras parceladas. Se a instituição informar um valor maior para esta fatura, vale o dela.')}
                     ${detail('Previsão de fechamento', proj ? money(proj.paceForecast, { currency: card.currency }) : '—', 'Fatura atual + ritmo médio de compras novas até o fechamento.')}
                     ${detail('Fatura seguinte (parcelas já conhecidas)', next ? html`${money(next.total, { currency: card.currency })} <span class="muted" style="font-weight:500;font-size:12px">${formatMonthKey(next.month)}</span>` : 'Nenhuma parcela futura', 'Parcelas já lançadas para o mês seguinte + próximas parcelas de compras parceladas.')}
+                    ${card.sharedLimitKey ? detail('Limite compartilhado', 'Com outro cartão', 'Este limite é dividido com outro cartão da mesma instituição (linha de limite consolidada). Nos totais ele conta uma só vez.') : ''}
                     ${card.minimumPayment !== null ? detail('Pagamento mínimo', money(card.minimumPayment, { currency: card.currency })) : ''}
                     ${detail('Saldo informado pela instituição', money(card.institutionBalance, { currency: card.currency }), 'Valor bruto "balance" da Pluggy. Em conectores Open Finance representa o limite utilizado; em outros, o saldo do mês.')}
                   </div>
+                  ${card.limitNote ? html`<div class="callout" data-limit-note>${icon('info')}<div>${card.limitNote}</div></div>` : ''}
                   ${!summary
                     ? html`<div class="callout callout--warn">${icon('calendar')}<div>A instituição não informa fechamento e vencimento deste cartão. <button type="button" class="link-btn" data-action="edit-card-cycle" data-value="${card.id}">Definir os dias</button> para calcular a fatura atual e a previsão.</div></div>`
                     : ''}
