@@ -15,16 +15,18 @@ import {
   type ConnectorInfo,
   type FinancialDataset,
   type IdentitySource,
+  type InstitutionIdentity,
   type InstitutionLogo,
   type LogoView,
   type NormalizedAccount,
   type NormalizedCard,
   type NormalizedInstitution,
   type NormalizedItem,
+  type ProductLogo,
   type UserLabels,
 } from '../models/finance';
 import { memoizeLast } from '../utils/async';
-import { KNOWN_ICON, bankIcon, bankIconByName, bankIconUrl, isAllowedLogoUrl, productIconFor, usableIconColor, type BankIcon } from './bankIcons';
+import { KNOWN_ICON, bankIcon, bankIconByName, bankIconUrl, isAllowedLogoUrl, isLocalIconUrl, isUploadedLogo, productIconFor, usableIconColor, type BankIcon } from './bankIcons';
 
 // ------------------------------------------------------------------ texto
 
@@ -343,6 +345,41 @@ export function defaultCardName(card: Pick<NormalizedCard, 'name' | 'brand' | 'l
 
 export function validDay(d: number | null | undefined): number | null {
   return typeof d === 'number' && Number.isInteger(d) && d >= 1 && d <= 31 ? d : null;
+}
+
+// ------------------------------------------------------------------ validação da personalização
+
+/**
+ * Valida e normaliza a identidade que o usuário definiu para uma conexão (nome, cor, logo). Nada do que vem de fora
+ * — tela, arquivo importado — entra sem passar por aqui: cor só #RRGGBB, logo só da biblioteca local, https ou imagem
+ * enviada já reduzida. Devolve null quando não há nome (= voltar ao automático).
+ */
+export function sanitizeIdentity(i: InstitutionIdentity): InstitutionIdentity | null {
+  const name = typeof i.name === 'string' ? i.name.trim().slice(0, 40) : '';
+  if (!name) return null;
+  const bank = bankIcon(i.bank)?.slug ?? null;
+  const imageUrl = !bank && isAllowedLogoUrl(i.imageUrl) && !isLocalIconUrl(i.imageUrl) ? i.imageUrl : null;
+  const hasImage = !!(bank || imageUrl);
+  const logo: InstitutionLogo = i.logo === 'image' || i.logo === 'icon' || i.logo === 'initials' ? i.logo : 'initials';
+  return {
+    name,
+    color: isHexColor(i.color) ? i.color.toUpperCase() : '#64748B',
+    logo: logo === 'image' && !hasImage ? 'initials' : logo,
+    icon: logo === 'icon' && typeof i.icon === 'string' ? i.icon.slice(0, 40) : null,
+    connectorId: imageUrl && /^https:/.test(imageUrl) && Number.isInteger(i.connectorId) ? i.connectorId : null,
+    imageUrl,
+    bank,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** Logo próprio de uma conta ou cartão: ícone da biblioteca local ou imagem enviada; nada além disso. */
+export function sanitizeProductLogo(p: ProductLogo | null): ProductLogo | null {
+  if (!p || typeof p !== 'object') return null;
+  if (p.inherit) return { bank: null, imageUrl: null, inherit: true };
+  const bank = bankIcon(p.bank)?.slug ?? null;
+  const imageUrl = !bank && isUploadedLogo(p.imageUrl) ? p.imageUrl : null;
+  return bank || imageUrl ? { bank, imageUrl } : null;
 }
 
 // ------------------------------------------------------------------ identidade resolvida

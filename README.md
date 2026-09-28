@@ -358,6 +358,26 @@ cartão), Faturas, Transações, Investimentos, Dashboard e Configurações.
   usar bandeira + nível (ex.: "Mastercard Gold"), e o nome do titular não é guardado.
 - Tudo fica **cifrado neste navegador**; "Voltar ao automático" desfaz a personalização.
 
+### Copiar as personalizações para outro aparelho
+
+Em *Configurações → Segurança* (celular e computador): **Exportar arquivo**, **Copiar**, **Importar arquivo** e **Colar**. No celular,
+"Exportar arquivo" abre a folha de compartilhar (salvar em Arquivos/Drive ou enviar por mensagem); no computador baixa o arquivo.
+"Copiar" e "Colar" levam o mesmo conteúdo como texto, para quando arquivo é incômodo.
+
+- **O que vai no arquivo:** tema e preferências de exibição (ocultar valores, incluir estimativas, validade do cache); organização do
+  dashboard (posição, tamanho, visibilidade e ordem no celular); nome, cor e logo de cada instituição; nome e logo/ícone de cada conta
+  e cartão; dias de fechamento e vencimento dos cartões; categorização (ajustes, regras, subcategorias) e lançamentos previstos.
+- **O que nunca entra, nem no arquivo nem no import:** Client ID/Secret, senha local, cofre, tokens e chaves da API, lista de conexões
+  (Items), bloqueio automático, modo de conexão (direto/proxy), conectores de teste e qualquer dado baixado da Pluggy (saldos, transações,
+  faturas). O arquivo é montado e lido a partir de uma **lista fechada de campos**: um arquivo editado à mão com esses campos não os
+  aplica, e o app avisa quais foram ignorados. Os identificadores de conexão, conta e cartão aparecem só como chave de cada
+  personalização (para saber a quem ela pertence) e não são credenciais.
+- **Ao importar:** o app mostra o que o arquivo vai aplicar e pede confirmação. O que já existe no aparelho é mantido; se houver conflito,
+  vale o do arquivo. Tudo é validado antes de entrar (cores, endereços de logo, datas 1–31, categorias, tamanhos) e o arquivo pode ter
+  até 4 MB. No modo demonstração só tema, preferências e dashboard são aplicados. Arquivos da versão 1 (só tema e dashboard) continuam
+  valendo.
+- Implementação: `src/services/userConfig.ts` (funções puras, com testes) e `src/pages/configTransfer.ts` (interface).
+
 ---
 
 ## Aplicativo (PWA)
@@ -398,7 +418,7 @@ Chamadas à API da Pluggy, ao Pluggy Connect e ao proxy local passam direto pela
 | Logos | Marcas de terceiros | Biblioteca local (react-bancos, MIT) usada só para identificar as instituições; você pode enviar a sua imagem |
 | iPhone: instalação | O Safari não oferece botão de instalar para sites | Instruções em Configurações → Aplicativo |
 | Categorias | Premium após o trial na Pluggy; podem vir nulas | Mapeamento por palavras-chave + ajustes do usuário |
-| Dados em outro dispositivo | Tudo é local | Cada navegador tem seu próprio cofre; exporte só a configuração visual |
+| Dados em outro dispositivo | Tudo é local | Cada navegador tem seu próprio cofre. As personalizações (nomes, ícones, datas dos cartões, dashboard…) se copiam com Exportar/Importar; os dados financeiros e as credenciais não |
 | Esqueceu a senha local | Não há recuperação (por desenho) | "Esqueci a senha local" apaga os dados locais para recomeçar |
 
 ---

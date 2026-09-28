@@ -13,9 +13,10 @@ import { VaultError, validateCredentialFormat } from '../security/vault';
 import * as actions from '../state/actions';
 import { notify } from '../state/notify';
 import { store } from '../state/store';
-import { clearLayout, exportVisualConfig, importVisualConfig, type ThemePref } from '../storage/preferences';
+import { clearLayout, type ThemePref } from '../storage/preferences';
 import { isPersistent } from '../storage/db';
 import { formatDateTime, formatRelative } from '../utils/format';
+import { copyConfig, exportConfigFile, importConfigFile, openPasteDialog } from './configTransfer';
 import { commonHandlers, logoOf, openAddInstitution } from './shared';
 import { itemStatusBadge } from './accounts';
 import { dayOptions, institutionDatesText } from './identity';
@@ -142,8 +143,16 @@ export function mount(ctx: PageContext): () => void {
             <div class="card__title card__title--lg">${icon('shield')}Segurança</div>
             ${!demo && c.vaultMode === 'passphrase' ? row('Alterar senha local', `PBKDF2-SHA256 com ${APP_CONFIG.security.pbkdf2Iterations.toLocaleString('pt-BR')} iterações protege a chave de dados.`, html`<button class="btn btn--secondary btn--sm" data-action="change-pass">${icon('key')}Alterar senha</button>`) : ''}
             ${!demo ? row('Remover credenciais', 'Remove Client ID e Client Secret deste navegador. O cache financeiro cifrado é mantido.', html`<button class="btn btn--danger btn--sm" data-action="remove-credentials" ${c.hasCredentials ? '' : 'disabled'}>${icon('trash')}Remover credenciais</button>`) : ''}
-            ${row('Exportar configuração visual', 'Tema, preferências de exibição e layout do dashboard (sem dados financeiros e sem credenciais).', html`<button class="btn btn--secondary btn--sm" data-action="export">${icon('download')}Exportar</button>`)}
-            ${row('Restaurar configuração', 'Importa um arquivo exportado anteriormente.', html`<label class="btn btn--secondary btn--sm">${icon('upload')}Importar<input type="file" accept="application/json,.json" data-change="import" hidden /></label>`)}
+            ${row(
+              'Exportar personalizações',
+              'Copie para outro aparelho (celular ou computador): nomes e ícones de contas e cartões, aparência, datas de fechamento e vencimento, organização do dashboard, categorização e lançamentos previstos. Não inclui credenciais, senha local, conexões nem dados da Pluggy.',
+              html`<button class="btn btn--secondary btn--sm" data-action="export">${icon('download')}Exportar arquivo</button><button class="btn btn--ghost btn--sm" data-action="copy-config">${icon('share')}Copiar</button>`,
+            )}
+            ${row(
+              'Importar personalizações',
+              'Traz para este aparelho um arquivo exportado (ou o texto copiado). Só entram personalizações: credenciais e dados de segurança nunca são importados. O que já existe aqui é mantido; em conflito, vale o do arquivo.',
+              html`<label class="btn btn--secondary btn--sm">${icon('upload')}Importar arquivo<input type="file" accept="application/json,.json,text/plain,.txt" data-change="import" hidden /></label><button class="btn btn--ghost btn--sm" data-action="paste-config">${icon('pencil')}Colar</button>`,
+            )}
             ${row('Apagar todos os dados locais', 'Remove credenciais, cache financeiro, categorização, layout e preferências deste navegador. Não afeta seus dados na Pluggy.', html`<button class="btn btn--danger-solid btn--sm" data-action="wipe">${icon('trash')}Apagar tudo</button>`)}
           </section>
 
@@ -329,18 +338,9 @@ export function mount(ctx: PageContext): () => void {
       const ok = await confirmDialog({ title: 'Remover credenciais?', message: 'Client ID e Client Secret serão apagados deste navegador. Para sincronizar de novo será preciso informá-los novamente.', confirmLabel: 'Remover credenciais', danger: true });
       if (ok) await actions.removeCredentials();
     },
-    export: async () => {
-      const json = await exportVisualConfig();
-      const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `cashflow-config-visual-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      notify('success', 'Configuração exportada', 'O arquivo não contém dados financeiros nem credenciais.');
-    },
+    export: () => void exportConfigFile(),
+    'copy-config': () => void copyConfig(),
+    'paste-config': () => openPasteDialog(),
     wipe: async () => {
       const ok = await confirmDialog({
         title: 'Apagar todos os dados locais?',
@@ -368,6 +368,7 @@ export function mount(ctx: PageContext): () => void {
     },
   });
 
+  // Os controles de Configurações marcam o campo com `data-change` (não `data-action`): daí o último argumento.
   const offChange = delegate(root, 'change', {
     autolock: (el) => void actions.updatePreferences({ autoLockMinutes: Number((el as HTMLSelectElement).value) }),
     sandbox: (el) => void actions.updatePreferences({ includeSandbox: (el as HTMLInputElement).checked }),
@@ -388,21 +389,9 @@ export function mount(ctx: PageContext): () => void {
       const input = el as HTMLInputElement;
       const file = input.files?.[0];
       input.value = '';
-      if (!file) return;
-      if (file.size > 200_000) {
-        notify('error', 'Arquivo grande demais', 'A configuração visual tem poucos KB.');
-        return;
-      }
-      try {
-        await importVisualConfig(await file.text());
-        actions.setTheme((localStorage.getItem('cashflow.theme') as ThemePref) ?? 'system');
-        await actions.reloadPreferences();
-        notify('success', 'Configuração restaurada');
-      } catch (e) {
-        notify('error', 'Não foi possível importar', e instanceof Error ? e.message : 'Arquivo inválido.');
-      }
+      if (file) await importConfigFile(file);
     },
-  });
+  }, 'change');
 
   const unsub = store.subscribe((s, prev) => {
     if (s.connection !== prev.connection || s.preferences !== prev.preferences || s.itemIds !== prev.itemIds || s.sync !== prev.sync || s.dataVersion !== prev.dataVersion || s.online !== prev.online) paint();

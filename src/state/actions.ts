@@ -33,16 +33,18 @@ import { isWebCryptoAvailable } from '../security/crypto';
 import { CategoryResolver } from '../services/categories';
 import { buildDemoDataset } from '../services/demoData';
 import { createSnapshot, calculateNetWorth, upsertSnapshot } from '../services/financialCalculator';
-import { applyIdentities, isHexColor, toHexColor, validDay } from '../services/institutions';
-import { bankIcon, isAllowedLogoUrl, isLocalIconUrl, isUploadedLogo } from '../services/bankIcons';
+import { applyIdentities, sanitizeIdentity, sanitizeProductLogo, toHexColor, validDay } from '../services/institutions';
 import { type NormalizedItemData, mergeItemData, normalizeBundle, normalizeItem } from '../services/financialDataService';
+import { type UserConfig, buildUserConfig, mergeCategorization, mergeLabels, mergePlanned } from '../services/userConfig';
 import { deleteDatabase, isPersistent } from '../storage/db';
 import {
   type ThemePref,
   type UserPreferences,
   applyTheme,
   getThemePref,
+  loadLayout,
   loadPreferences,
+  saveLayout,
   savePreferences,
   setThemePref,
 } from '../storage/preferences';
@@ -144,11 +146,50 @@ export async function updatePreferences(patch: Partial<UserPreferences>): Promis
   }
 }
 
-/** Relê as preferências salvas (ex.: após importar configuração visual). */
+/** Relê as preferências salvas. */
 export async function reloadPreferences(): Promise<void> {
   const preferences = await loadPreferences();
   setDebugLogging(preferences.debug);
   store.set({ preferences });
+}
+
+// ------------------------------------------------------------------ personalizações (exportar / importar)
+
+/**
+ * Texto (JSON) com as personalizações do usuário, para copiar para outro aparelho. Só entra o que a lista fechada de
+ * services/userConfig.ts permite: nunca credenciais, senha local, conexões nem dados baixados da Pluggy.
+ */
+export async function exportUserConfig(): Promise<string> {
+  const s = store.state;
+  const config = buildUserConfig({
+    theme: s.theme.pref,
+    preferences: { hideValues: s.preferences.hideValues, includeEstimates: s.preferences.includeEstimates, cacheTtlHours: s.preferences.cacheTtlHours },
+    layout: await loadLayout(),
+    labels: s.labels,
+    categorization: s.categorization,
+    planned: s.planned,
+  });
+  return JSON.stringify(config, null, 2);
+}
+
+/**
+ * Aplica personalizações já validadas (parseUserConfig). O que veio no arquivo vence em caso de conflito e o que só
+ * existe aqui é mantido. Não altera credenciais, cofre, conexões, bloqueio automático nem dados baixados.
+ * `savedData` = false no modo demonstração: nomes, ícones, datas e categorização ficam no cofre cifrado e lá nada é gravado.
+ */
+export async function importUserConfig(cfg: UserConfig): Promise<{ savedData: boolean }> {
+  if (cfg.theme) setTheme(cfg.theme);
+  if (Object.keys(cfg.preferences).length) await updatePreferences(cfg.preferences);
+  if (cfg.layout) await saveLayout(cfg.layout);
+  if (store.state.mode !== 'real') return { savedData: false };
+  if (cfg.labels) await saveLabels(mergeLabels(store.state.labels, cfg.labels));
+  if (cfg.categorization) await saveCategorization(mergeCategorization(store.state.categorization, cfg.categorization));
+  if (cfg.planned) {
+    const planned = mergePlanned(store.state.planned, cfg.planned);
+    store.set({ planned });
+    await secureRepo.put('categories', 'planned', planned);
+  }
+  return { savedData: true };
 }
 
 // ------------------------------------------------------------------ novidades da versão
@@ -943,32 +984,6 @@ async function saveLabels(labels: UserLabels): Promise<void> {
   if (store.state.mode === 'real') await secureRepo.put('categories', 'labels', labels);
 }
 
-function cleanIdentity(i: InstitutionIdentity): InstitutionIdentity | null {
-  const name = i.name.trim().slice(0, 40);
-  if (!name) return null;
-  const bank = bankIcon(i.bank)?.slug ?? null;
-  const imageUrl = !bank && isAllowedLogoUrl(i.imageUrl) && !isLocalIconUrl(i.imageUrl) ? i.imageUrl : null;
-  const hasImage = !!(bank || imageUrl);
-  return {
-    name,
-    color: isHexColor(i.color) ? i.color.toUpperCase() : '#64748B',
-    logo: i.logo === 'image' && !hasImage ? 'initials' : i.logo,
-    icon: i.logo === 'icon' ? i.icon : null,
-    connectorId: imageUrl && /^https:/.test(imageUrl) ? i.connectorId : null,
-    imageUrl,
-    bank,
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function cleanProductLogo(p: ProductLogo | null): ProductLogo | null {
-  if (!p) return null;
-  if (p.inherit) return { bank: null, imageUrl: null, inherit: true };
-  const bank = bankIcon(p.bank)?.slug ?? null;
-  const imageUrl = !bank && isUploadedLogo(p.imageUrl) ? p.imageUrl : null;
-  return bank || imageUrl ? { bank, imageUrl } : null;
-}
-
 /**
  * Salva a personalização de uma conexão: identidade (null = voltar ao automático)
  * e apelidos das contas/cartões dela (string vazia = remover apelido).
@@ -981,7 +996,7 @@ export async function saveInstitutionCustomization(
 ): Promise<void> {
   const cur = store.state.labels;
   const identities = { ...cur.identities };
-  const clean = identity ? cleanIdentity(identity) : null;
+  const clean = identity ? sanitizeIdentity(identity) : null;
   if (clean) identities[itemId] = clean;
   else delete identities[itemId];
   const nick = { ...cur.nicknames };
@@ -992,7 +1007,7 @@ export async function saveInstitutionCustomization(
   }
   const logos = { ...cur.productLogos };
   for (const [id, value] of Object.entries(productLogos)) {
-    const v = cleanProductLogo(value);
+    const v = sanitizeProductLogo(value);
     if (v) logos[id] = v;
     else delete logos[id];
   }

@@ -108,7 +108,6 @@ function topbar(title: string, st: AppState): SafeHtml {
   const syncing = st.sync.status === 'syncing';
   return html`<header class="topbar">
     <div class="row" style="min-width:0">
-      <a class="brand__mark topbar__brand" href="#/dashboard" aria-label="Início">${logoMark()}</a>
       <div class="topbar__title">
         <h1 id="page-title" tabindex="-1">${title}</h1>
         <span class="sync-status" data-state="${s.state}" data-sync-status aria-live="polite"><span class="dot" aria-hidden="true"></span><span class="truncate">${s.text}</span></span>
@@ -122,7 +121,7 @@ function topbar(title: string, st: AppState): SafeHtml {
       <button type="button" class="icon-btn" data-action="toggle-values" aria-pressed="${st.preferences.hideValues ? 'true' : 'false'}" aria-label="${st.preferences.hideValues ? 'Mostrar valores' : 'Ocultar valores'}" data-tip="${st.preferences.hideValues ? 'Mostrar valores' : 'Ocultar valores'}">
         ${icon(st.preferences.hideValues ? 'eyeOff' : 'eye')}
       </button>
-      <div class="menu-wrap">
+      <div class="menu-wrap hide-mobile">
         <button type="button" class="icon-btn" data-action="menu" data-menu="theme" aria-haspopup="menu" aria-expanded="false" aria-label="Tema: ${st.theme.pref === 'system' ? 'Sistema' : st.theme.pref === 'dark' ? 'Escuro' : 'Claro'}" data-tip="Tema: ${st.theme.pref === 'system' ? 'Sistema' : st.theme.pref === 'dark' ? 'Escuro' : 'Claro'}">${icon(THEME_ICON[st.theme.pref])}</button>
         <div class="menu" role="menu" data-menu-panel="theme">
           <div class="menu__label">Tema</div>
@@ -134,10 +133,11 @@ function topbar(title: string, st: AppState): SafeHtml {
         </div>
       </div>
       <div class="menu-wrap">
-        <button type="button" class="icon-btn icon-btn--outline" data-action="menu" data-menu="user" aria-haspopup="menu" aria-expanded="false" aria-label="Menu do usuário" data-tip="Menu e configurações">${icon('user')}</button>
+        <button type="button" class="icon-btn" data-action="menu" data-menu="user" aria-haspopup="menu" aria-expanded="false" aria-label="Menu do usuário" data-tip="Menu e configurações">${icon('user')}</button>
         <div class="menu" role="menu" data-menu-panel="user">
           <div class="menu__label">${st.mode === 'demo' ? 'Modo demonstração' : 'Sua sessão'}</div>
           <a class="menu__item" role="menuitem" href="#/configuracoes">${icon('settings')}Configurações</a>
+          <a class="menu__item menu__item--mobile" role="menuitem" href="#/configuracoes?secao=aparencia">${icon('palette')}Aparência e tema</a>
           <a class="menu__item" role="menuitem" href="#/privacidade">${icon('shield')}Privacidade e segurança</a>
           <a class="menu__item" role="menuitem" href="#/novidades">${icon('gift')}Notas de Atualização <span class="menu__meta">v${APP_CONFIG.version}</span></a>
           ${installState() === 'available' ? html`<button type="button" class="menu__item" role="menuitem" data-action="install-app">${icon('phone')}Instalar aplicativo</button>` : ''}

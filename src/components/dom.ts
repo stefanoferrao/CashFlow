@@ -58,21 +58,23 @@ export function $$(selector: string, root: ParentNode = document): HTMLElement[]
 }
 
 /**
- * Delegação de eventos por `data-action`. Retorna função para remover o listener.
- * handlers[action](element, event)
+ * Delegação de eventos por `data-action` (ou por `data-change`, com `attr: 'change'` — usado pelos controles de
+ * Configurações, que marcam o campo com o nome da preferência). Retorna função para remover o listener.
+ * handlers[nome](element, event)
  */
 export function delegate(
   root: HTMLElement,
   type: string,
   handlers: Record<string, (el: HTMLElement, ev: Event) => void>,
+  attr: 'action' | 'change' = 'action',
 ): () => void {
   const listener = (ev: Event) => {
     const target = ev.target as HTMLElement | null;
-    const el = target?.closest<HTMLElement>('[data-action]');
+    const el = target?.closest<HTMLElement>(`[data-${attr}]`);
     if (!el || !root.contains(el)) return;
-    const action = el.dataset.action;
-    if (!action) return;
-    const fn = handlers[action];
+    const name = el.dataset[attr];
+    if (!name) return;
+    const fn = handlers[name];
     if (fn) fn(el, ev);
   };
   root.addEventListener(type, listener);

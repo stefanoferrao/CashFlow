@@ -149,6 +149,14 @@
   flex-direction: column;
 }
 
+/* O cabeçalho fica dentro de um <div data-topbar> (repintado à parte). Sem caixa própria, o `sticky` da barra vale na
+   página inteira — antes ela ficava presa a um contêiner de 60px e rolava junto com o conteúdo. */
+[data-topbar] {
+  display: contents;
+}
+
+/* Barra superior no estilo de app nativo: fundo sólido (o mesmo da barra de status do aparelho, sem "vidro" de página
+   web), fixa no topo, filete só quando o conteúdo rola por baixo e botões de ícone todos iguais. */
 .topbar {
   position: sticky;
   top: 0;
@@ -158,16 +166,32 @@
   justify-content: space-between;
   gap: var(--s-4);
   min-height: var(--header-h);
-  padding: var(--s-3) var(--s-8);
-  padding-top: calc(var(--s-3) + var(--safe-top));
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  backdrop-filter: saturate(160%) blur(14px);
-  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  padding: var(--s-2) var(--s-8);
+  padding-top: calc(var(--s-2) + var(--safe-top));
+  background: var(--bg);
   border-bottom: 1px solid transparent;
   transition: border-color var(--t-med) var(--ease);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .topbar.is-scrolled {
   border-bottom-color: var(--border);
+}
+.topbar .icon-btn {
+  color: var(--text);
+  touch-action: manipulation;
+}
+.topbar .icon-btn:active:not(:disabled) {
+  background: var(--surface-3);
+}
+/* "Atualizar agora": botão tonal, sem contorno — como os botões de uma barra de ferramentas nativa. */
+.topbar .btn--secondary {
+  background: var(--surface-2);
+  border-color: transparent;
+}
+.topbar .btn--secondary:hover:not(:disabled) {
+  background: var(--surface-3);
 }
 .topbar__title {
   display: flex;
@@ -191,10 +215,6 @@
   gap: var(--s-2);
   flex: none;
 }
-.topbar__brand {
-  display: none;
-}
-
 .sync-status {
   display: inline-flex;
   align-items: center;
@@ -392,15 +412,31 @@
     display: none;
   }
   .topbar {
-    padding: var(--s-2) var(--s-4);
-    padding-top: calc(var(--s-2) + var(--safe-top));
-    min-height: 60px;
+    padding: var(--s-1) var(--s-4);
+    padding-top: calc(var(--s-1) + var(--safe-top));
+    min-height: 56px;
+    gap: var(--s-2);
   }
   .topbar__title h1 {
-    font-size: var(--fs-lg);
+    font-size: var(--fs-xl);
+    font-weight: 700;
+    letter-spacing: -0.02em;
   }
-  .topbar__brand {
-    display: grid;
+  .topbar .sync-status {
+    font-size: var(--fs-xs);
+  }
+  /* Área de toque de 44px e os ícones alinhados à borda da tela (o botão tem folga interna). */
+  .topbar .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .topbar .icon-btn svg {
+    width: 22px;
+    height: 22px;
+  }
+  .topbar__actions {
+    gap: 0;
+    margin-right: -10px;
   }
   .topbar .hide-mobile {
     display: none !important;
@@ -494,10 +530,7 @@
     gap: var(--s-2);
   }
   .topbar__actions {
-    gap: 2px;
-  }
-  .topbar__brand {
-    display: none;
+    gap: 0;
   }
   .bottom-nav__item {
     font-size: 10px;

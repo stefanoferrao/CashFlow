@@ -1007,6 +1007,9 @@ button.list-item:hover {
   right: 0;
   top: calc(100% + 6px);
   min-width: 220px;
+  /* Largura pelo conteúdo (o contêiner é do tamanho de um botão): os itens ficam em uma linha, sem vazar da tela. */
+  width: max-content;
+  max-width: min(320px, calc(100vw - var(--s-8)));
   padding: 6px;
   border-radius: var(--r-lg);
   background: var(--surface);
@@ -1048,6 +1051,15 @@ button.list-item:hover {
   background: var(--surface-2);
   text-decoration: none;
   outline: none;
+}
+/* Atalho que só existe no celular (no computador o tema fica na barra superior). */
+.menu__item--mobile {
+  display: none;
+}
+@media (max-width: 767px) {
+  .menu__item--mobile {
+    display: flex;
+  }
 }
 .menu__item svg {
   width: 18px;
