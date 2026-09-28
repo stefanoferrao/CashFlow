@@ -845,6 +845,77 @@ code {
   padding-top: 6px;
   padding-bottom: 6px;
 }
+/* Linha com uma lista embaixo (ex.: Instituições). Precisa ser coluna SEM quebra: em coluna com flex-wrap a linha
+   ganha a largura do maior item (não a do card), a página fica mais larga que a tela e o navegador do celular
+   expande a janela — cortando o menu inferior e empurrando botões para fora do card. */
+.setting-row--stack {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+.setting-row--stack > * {
+  min-width: 0;
+}
+.conn-row__end {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  min-width: 0;
+}
+.conn-row__status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+.conn-row__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: none;
+}
+@media (max-width: 767px) {
+  /* Celular: logo, nome e ações (personalizar/remover) na primeira linha; situação embaixo, alinhada ao nome. */
+  .conn-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'logo main actions'
+      '.    status status';
+    align-items: center;
+    column-gap: var(--s-3);
+    row-gap: var(--s-2);
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .conn-row > .inst-logo {
+    grid-area: logo;
+  }
+  .conn-row > .list-item__main {
+    grid-area: main;
+  }
+  .conn-row .list-item__sub {
+    white-space: normal;
+    overflow: visible;
+  }
+  .conn-row__end {
+    display: contents;
+  }
+  .conn-row__status {
+    grid-area: status;
+    justify-content: flex-start;
+  }
+  .conn-row__actions {
+    grid-area: actions;
+  }
+  .conn-row__actions .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+}
 @media (max-width: 899px) {
   .settings-layout {
     grid-template-columns: minmax(0, 1fr);

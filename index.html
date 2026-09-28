@@ -24,14 +24,25 @@
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
     <!-- Aplica o tema antes da primeira pintura (evita "flash" do tema errado). Arquivo local, sem dados sensíveis. -->
     <script src="./theme-boot.js"></script>
+    <!-- Sem JavaScript o app não abre: a tela de carregamento sairia da frente do aviso do <noscript>. -->
+    <noscript><style>.splash{display:none!important}</style></noscript>
   </head>
   <body>
-    <a class="skip-link" href="#main">Pular para o conteúdo</a>
-    <div id="app" aria-live="off">
-      <div class="boot" role="status" aria-label="Carregando">
-        <div class="boot__logo" aria-hidden="true"></div>
+    <!-- Tela de carregamento: HTML puro para aparecer no primeiro quadro, antes de qualquer JavaScript.
+         Estilos em src/styles/base.css; a saída (fade + remoção) fica em src/components/splash.ts. -->
+    <div id="splash" class="splash" role="status" aria-live="polite" aria-label="Carregando o CashFlow">
+      <div class="splash__center">
+        <div class="splash__mark" aria-hidden="true">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 16.5 10 11.5l3.5 3L19 8" stroke-width="2.4" /><circle cx="19" cy="8" r="1.8" fill="#22C55E" stroke="none" /></svg>
+        </div>
+        <div class="splash__name">CashFlow</div>
+        <div class="splash__bar" aria-hidden="true"></div>
+        <p class="splash__hint" id="splash-hint">Carregando suas finanças…</p>
       </div>
+      <p class="splash__foot">Dados processados somente no seu navegador.</p>
     </div>
+    <a class="skip-link" href="#main">Pular para o conteúdo</a>
+    <div id="app" aria-live="off"></div>
     <div id="toasts" class="toasts" role="region" aria-live="polite" aria-label="Notificações"></div>
     <div id="modal-root"></div>
     <noscript>O CashFlow precisa de JavaScript habilitado.</noscript>

@@ -5,6 +5,7 @@
 import { destroyCharts, rethemeCharts, resizeCharts } from './charts/charts';
 import { html, render } from './components/dom';
 import { mountShell, type ShellHandle } from './components/shell';
+import { failSplash, hideSplash } from './components/splash';
 import { mountToasts } from './components/toast';
 import { installTooltips } from './components/tooltip';
 import { navigate, parseHash, ROUTES, type PageModule } from './router';
@@ -60,19 +61,23 @@ async function renderScreen(mode: AppMode): Promise<void> {
   shell = null;
   destroyCharts();
 
+  // A tela de carregamento (index.html) só sai depois que a primeira tela de verdade estiver montada.
   if (mode === 'booting') return;
   if (mode === 'onboarding') {
     const m = await import('./pages/onboarding');
     cleanupScreen = m.mountOnboarding(app) ?? null;
+    hideSplash();
     return;
   }
   if (mode === 'locked') {
     const m = await import('./pages/lock');
     cleanupScreen = m.mountLock(app) ?? null;
+    hideSplash();
     return;
   }
   shell = mountShell(app, parseHash().path);
   await mountRoute();
+  hideSplash();
 }
 
 export async function startApp(): Promise<void> {
@@ -82,7 +87,10 @@ export async function startApp(): Promise<void> {
   store.subscribe((s, prev) => {
     if (s.mode !== currentMode) {
       currentMode = s.mode;
-      void renderScreen(s.mode);
+      void renderScreen(s.mode).catch((e) => {
+        failSplash();
+        throw e;
+      });
       if (s.mode === 'real' || s.mode === 'demo') setTimeout(() => actions.announceNewVersion(() => navigate('novidades')), 1200);
     }
     if (s.theme.resolved !== prev.theme.resolved) requestAnimationFrame(() => rethemeCharts());
@@ -110,7 +118,12 @@ export async function startApp(): Promise<void> {
     notify('error', 'Algo deu errado', 'A operação não pôde ser concluída. Tente novamente.');
   });
 
-  await actions.boot();
+  try {
+    await actions.boot();
+  } catch (e) {
+    failSplash();
+    throw e;
+  }
   document.documentElement.setAttribute('data-hide-values', String(store.state.preferences.hideValues));
   actions.startAutoLock();
   if (!location.hash) navigate('dashboard');

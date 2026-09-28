@@ -9,6 +9,11 @@ html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   background: var(--bg);
+  /* Rede de segurança: `overflow-x: hidden` só no body não impede o Chrome do Android de "esticar" a janela quando algum
+     elemento fica mais largo que a tela (o menu inferior fixo é cortado e a página passa a rolar de lado). Com `clip` no
+     html e no body o excesso é cortado sem criar um contêiner de rolagem (o `position: sticky` continua valendo). */
+  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 body {
@@ -24,6 +29,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: 'ss01' on;
   overflow-x: hidden;
+  overflow-x: clip;
   transition: background-color var(--t-med) var(--ease), color var(--t-med) var(--ease);
 }
 
@@ -164,19 +170,149 @@ canvas {
   filter: blur(5px);
 }
 
-/* Boot */
-.boot {
-  min-height: 100vh;
+/* ===================== Tela de carregamento (splash) =====================
+   Cobre a tela inteira desde o primeiro quadro (o HTML está no index.html) até o app terminar de montar.
+   Visual "flat": cores sólidas dos tokens, sem gradiente nem sombra; acompanha o tema claro/escuro. */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  justify-items: center;
+  padding: calc(var(--s-8) + var(--safe-top)) var(--s-6) calc(var(--s-6) + var(--safe-bottom));
+  background: var(--bg);
+  color: var(--text);
+  opacity: 1;
+  transition: opacity var(--t-slow) var(--ease), visibility 0s linear var(--t-slow);
+}
+.splash.is-leaving {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.splash__center {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-5);
+  text-align: center;
+}
+.splash__mark {
+  position: relative;
   display: grid;
   place-items: center;
+  width: clamp(112px, 30vmin, 184px);
+  aspect-ratio: 1;
+  border-radius: 28%;
+  background: var(--surface-inverse);
+  animation: splash-pop 0.5s var(--ease-out) both;
 }
-.boot__logo {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+/* Anel que se expande e some: o único movimento do logo. */
+.splash__mark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid var(--accent);
+  opacity: 0;
+  animation: splash-ring 1.8s var(--ease-out) 0.4s infinite;
+}
+.splash__mark svg {
+  width: 62%;
+  height: 62%;
+}
+.splash__name {
+  font-size: clamp(2rem, 1.4rem + 2.6vw, 3rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.splash__bar {
+  position: relative;
+  width: clamp(160px, 40vw, 260px);
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.splash__bar::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: inherit;
   background: var(--accent);
-  animation: boot-pulse 1.2s var(--ease) infinite;
+  animation: splash-slide 1.2s var(--ease) infinite;
 }
+.splash__hint {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.splash__foot {
+  max-width: 36ch;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-align: center;
+}
+.splash.is-error .splash__bar,
+.splash.is-error .splash__mark::after {
+  display: none;
+}
+.splash.is-error .splash__hint {
+  color: var(--negative);
+}
+@media (max-height: 460px) {
+  .splash__mark {
+    width: 72px;
+  }
+  .splash__foot {
+    display: none;
+  }
+}
+@keyframes splash-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes splash-ring {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+@keyframes splash-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Sem movimento: barra parada e anel oculto (a regra global deixaria a barra fora da trilha). */
+  .splash__bar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.35;
+  }
+  .splash__mark::after {
+    display: none;
+  }
+}
+
+/* Pulso usado também pelo indicador de sincronização. */
 @keyframes boot-pulse {
   0%,
   100% {

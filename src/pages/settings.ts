@@ -101,18 +101,18 @@ export function mount(ctx: PageContext): () => void {
                 segmented('api-mode', [{ value: 'direct', label: 'Direto' }, { value: 'proxy', label: 'Proxy local' }], s.preferences.apiMode, 'Modo de conexão'),
               )}
               ${row('Conectores de teste', 'Mostrar o banco sandbox da Pluggy no Pluggy Connect (usuário user-ok, senha password-ok).', html`<label class="switch"><input type="checkbox" data-change="sandbox" ${s.preferences.includeSandbox ? 'checked' : ''} /><span class="switch__track"></span><span class="sr-only">Incluir sandbox</span></label>`)}
-              <div class="setting-row" style="flex-direction:column;align-items:stretch">
+              <div class="setting-row setting-row--stack">
                 <div class="row-between wrap"><div class="setting-row__text"><strong>Instituições (Items)</strong><span>${s.itemIds.length} registrada(s) neste navegador.</span></div>
                   <button class="btn btn--primary btn--sm" data-action="add-institution" ${c.hasCredentials ? '' : 'disabled'}>${icon('plus')}Adicionar instituição</button></div>
                 ${s.itemIds.length
                   ? html`<div class="list">${s.itemIds.map((id) => {
                       const it = ds.items.find((i) => i.id === id) ?? null;
-                      return html`<div class="list-item">${it ? instLogo(it.institution) : html`<span class="inst-logo">${icon('bank')}</span>`}
+                      return html`<div class="list-item conn-row">${it ? instLogo(it.institution) : html`<span class="inst-logo">${icon('bank')}</span>`}
                         <span class="list-item__main"><span class="list-item__title">${it?.institution.name ?? 'Aguardando sincronização'}</span><span class="list-item__sub">${it?.institution.via ? `via ${it.institution.via} · ` : ''}<code>${id.slice(0, 8)}…${id.slice(-4)}</code></span></span>
-                        ${(ds.duplicates ?? []).some((d) => d.itemId === id) ? badge('Repetida', 'warn', 'alert') : ''}
-                        ${itemStatusBadge(it, s.sync.status === 'syncing')}
-                        ${it ? html`<button class="icon-btn icon-btn--sm" data-action="edit-identity" data-value="${id}" aria-label="Personalizar ${it.institution.name}" data-tip="Personalizar">${icon('palette')}</button>` : ''}
-                        <button class="icon-btn icon-btn--sm" data-action="remove-item" data-value="${id}" aria-label="Remover ${it?.institution.name ?? id} deste navegador">${icon('trash')}</button></div>`;
+                        <span class="conn-row__end">
+                          <span class="conn-row__status">${(ds.duplicates ?? []).some((d) => d.itemId === id) ? badge('Repetida', 'warn', 'alert') : ''}${itemStatusBadge(it, s.sync.status === 'syncing')}</span>
+                          <span class="conn-row__actions">${it ? html`<button class="icon-btn icon-btn--sm" data-action="edit-identity" data-value="${id}" aria-label="Personalizar ${it.institution.name}" data-tip="Personalizar">${icon('palette')}</button>` : ''}<button class="icon-btn icon-btn--sm" data-action="remove-item" data-value="${id}" aria-label="Remover ${it?.institution.name ?? id} deste navegador">${icon('trash')}</button></span>
+                        </span></div>`;
                     })}</div>`
                   : ''}
               </div>`}
