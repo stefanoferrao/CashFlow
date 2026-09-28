@@ -11,10 +11,28 @@ import { passphraseStrength } from '../security/crypto';
 import { validateCredentialFormat } from '../security/vault';
 import * as actions from '../state/actions';
 import { notify } from '../state/notify';
-import { store } from '../state/store';
+import { type DiscoveryState, store } from '../state/store';
 import { privacyPoints } from './privacy';
 
 type Step = 0 | 1 | 2 | 3;
+
+/** Resultado da busca automática dos Items que já existem na conta Pluggy (o "Tenho um Item ID" abaixo continua valendo). */
+function discoveryNotice(d: DiscoveryState): SafeHtml | string {
+  switch (d.status) {
+    case 'running':
+      return html`<p class="row muted" role="status" data-discovery="running">${icon('refresh', 'spin')}<span>Procurando conexões que já existem na sua conta Pluggy…</span></p>`;
+    case 'added':
+      return html`<div class="callout callout--good" role="status" data-discovery="added">${icon('check')}<div><strong>${d.added === 1 ? 'Encontramos 1 conexão' : `Encontramos ${d.added} conexões`} na sua conta Pluggy.</strong> Já foram adicionadas: não precisa copiar o Item ID.</div></div>`;
+    case 'none':
+      return html`<div class="callout" role="status" data-discovery="none">${icon('info')}<div>Nenhuma conexão existente foi encontrada na sua conta Pluggy. Conecte um banco pelo Pluggy Connect ou informe um Item ID.</div></div>`;
+    case 'unavailable':
+      return html`<div class="callout" role="status" data-discovery="unavailable">${icon('info')}<div>A busca automática de conexões não está habilitada na sua aplicação Pluggy (é um recurso opcional deles). Conecte pelo Pluggy Connect ou informe o Item ID abaixo.</div></div>`;
+    case 'failed':
+      return html`<div class="callout" role="status" data-discovery="failed">${icon('info')}<div>Não foi possível buscar as conexões existentes agora. Conecte pelo Pluggy Connect ou informe o Item ID abaixo.</div></div>`;
+    default:
+      return '';
+  }
+}
 
 export function screenAside(): SafeHtml {
   return html`<aside class="screen__aside">
@@ -128,6 +146,7 @@ export function mountOnboarding(host: HTMLElement): () => void {
       <span class="step-label">Passo 2 de 3</span>
       <h1>Conecte suas instituições.</h1>
       <div class="callout callout--good">${icon('check')}<div><strong>Conexão com a Pluggy funcionando.</strong> Credenciais ${s.connection.vaultMode === 'session' ? 'mantidas só nesta sessão' : 'salvas e cifradas neste navegador'}.</div></div>
+      ${discoveryNotice(s.discovery)}
       <div class="option-card">
         <div class="row">${icon('plug')}<strong>Pluggy Connect</strong></div>
         <p class="muted">Widget oficial da Pluggy para conectar um banco (ou o Meu Pluggy). Se a conta já estiver conectada, a conexão existente é reaproveitada — nenhuma conexão nova é criada.</p>
@@ -159,11 +178,26 @@ export function mountOnboarding(host: HTMLElement): () => void {
       <button type="button" class="btn btn--primary btn--lg btn--block" data-action="finish">Ir para o Dashboard${icon('chevronRight')}</button>`,
   };
 
+  let paintedStep: Step | null = null;
   const paint = () => {
+    // Repintar o mesmo passo (chegou o resultado da busca automática, mudou o progresso…) não pode apagar o Item ID
+    // que a pessoa está digitando nem tirar o foco do campo.
+    const idInput = host.querySelector<HTMLInputElement>('input[name="itemId"]');
+    const keep = paintedStep === step && idInput ? { value: idInput.value, focused: document.activeElement === idInput, start: idInput.selectionStart, end: idInput.selectionEnd } : null;
     render(
       host,
       html`${themeFloat()}<div class="screen">${screenAside()}<main class="screen__main" id="main"><div class="screen__panel">${views[step]()}</div></main></div>`,
     );
+    paintedStep = step;
+    const restored = keep ? host.querySelector<HTMLInputElement>('input[name="itemId"]') : null;
+    if (keep && restored) {
+      restored.value = keep.value;
+      if (keep.focused) {
+        restored.focus({ preventScroll: true });
+        restored.setSelectionRange(keep.start ?? keep.value.length, keep.end ?? keep.value.length);
+        return;
+      }
+    }
     const focusTarget = host.querySelector<HTMLElement>(step === 1 ? 'input[name="clientId"]' : 'h1');
     if (focusTarget && step !== 0) {
       if (focusTarget.tagName === 'H1') focusTarget.setAttribute('tabindex', '-1');
@@ -301,7 +335,7 @@ export function mountOnboarding(host: HTMLElement): () => void {
   host.addEventListener('submit', onSubmit);
   host.addEventListener('input', onInput);
   const unsub = store.subscribe((s, prev) => {
-    if (step === 2 && (s.sync.progress !== prev.sync.progress || s.itemIds !== prev.itemIds)) paint();
+    if (step === 2 && (s.sync.progress !== prev.sync.progress || s.itemIds !== prev.itemIds || s.discovery !== prev.discovery)) paint();
   });
 
   paint();

@@ -198,7 +198,7 @@ export function openAddInstitution(): void {
       </details>
       <details class="details">
         <summary>Buscar automaticamente os Items da minha aplicação</summary>
-        <p class="muted">Usa <code>GET /v2/items</code>, um recurso <strong>opcional</strong> que precisa ser habilitado pelo suporte da Pluggy. Se não estiver habilitado, você verá um aviso.</p>
+        <p class="muted">Usa <code>GET /v2/items</code>, um recurso <strong>opcional</strong> que precisa ser habilitado pelo suporte da Pluggy. O CashFlow já faz essa busca sozinho ao conectar a conta; use o botão para repetir. Se não estiver habilitado, você verá um aviso e o Item ID acima continua valendo.</p>
         <button type="button" class="btn btn--ghost btn--sm" data-discover>${icon('search')}Buscar Items</button>
       </details>`,
   });

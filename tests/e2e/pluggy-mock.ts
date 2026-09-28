@@ -8,6 +8,8 @@ export const ITEM_ID = '11111111-2222-4333-8444-555555555555';
 export const CLIENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 export const GOOD_SECRET = 'segredo-valido-1234567890';
 export const BAD_SECRET = 'segredo-invalido-000000';
+/** Item de um conector de teste (sandbox), devolvido só pela listagem simulada. */
+export const SANDBOX_ITEM_ID = '99999999-8888-4777-8666-555555555555';
 
 const day = (offset: number) => {
   const d = new Date();
@@ -34,6 +36,8 @@ export interface MockState {
   itemStatus: number;
   /** Corpos enviados a POST /connect_token. */
   connectTokenBodies: unknown[];
+  /** Atraso, em ms, aplicado a cada resposta da API (pode ser mudado no meio do teste). */
+  delayMs: number;
 }
 
 /**
@@ -62,13 +66,34 @@ export const NUBANK_LOGO = 'https://cdn.pluggy.ai/e2e-mock/nubank.svg';
 const json = (route: Route, status: number, body: unknown) =>
   route.fulfill({ status, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify(body) });
 
+function itemBody(id: string, meuPluggy: boolean) {
+  return {
+    id,
+    connector: meuPluggy
+      ? { id: 200, name: 'MeuPluggy', primaryColor: 'ef294b', isOpenFinance: false, isSandbox: false, imageUrl: '' }
+      : { id: 201, name: 'Banco Mock', primaryColor: '0f766e', isOpenFinance: true, isSandbox: false, imageUrl: '' },
+    status: 'UPDATED',
+    executionStatus: 'SUCCESS',
+    statusDetail: null,
+    error: null,
+    createdAt: day(-100),
+    updatedAt: day(0),
+    lastUpdatedAt: new Date(Date.now() - 3600_000).toISOString(),
+    nextAutoSyncAt: null,
+    consentExpiresAt: null,
+  };
+}
+
 /**
  * `meuPluggy`: simula uma conexão feita pelo Meu Pluggy (conector 200, sem nome do banco), com conta nomeada pela
  * razão social, cartão nomeado com o titular e sem datas de fechamento/vencimento — o caso real que motivou a
  * camada de identidade das instituições.
+ * `listItems`: comportamento de GET /v2/items — `enabled` devolve o Item e um Item de conector de teste; `forbidden`
+ * responde 403 (recurso opt-in ainda não habilitado pela Pluggy); sem a opção, a rota não existe (404).
+ * `delayMs`: atrasa todas as respostas da API (para observar a tela de carregamento); também vale mudar `state.delayMs` depois.
  */
-export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPluggy?: boolean } = {}): Promise<MockState> {
-  const state: MockState = { authCalls: 0, cursorCalls: 0, requests: [], itemStatus: opts.itemStatus ?? 200, connectTokenBodies: [] };
+export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPluggy?: boolean; listItems?: 'enabled' | 'forbidden'; delayMs?: number } = {}): Promise<MockState> {
+  const state: MockState = { authCalls: 0, cursorCalls: 0, requests: [], itemStatus: opts.itemStatus ?? 200, connectTokenBodies: [], delayMs: opts.delayMs ?? 0 };
   const mp = !!opts.meuPluggy;
   await page.route('https://cdn.pluggy.ai/e2e-mock/**', (route) =>
     route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#820AD1"/></svg>' }),
@@ -77,6 +102,7 @@ export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPlu
     const req = route.request();
     const url = new URL(req.url());
     state.requests.push(`${req.method()} ${url.pathname}${url.search}`);
+    if (state.delayMs && req.method() !== 'OPTIONS') await new Promise((r) => setTimeout(r, state.delayMs));
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': '*' } });
 
     if (url.pathname === '/auth') {
@@ -85,23 +111,19 @@ export async function mockPluggy(page: Page, opts: { itemStatus?: number; meuPlu
       if (body.clientSecret !== GOOD_SECRET) return json(route, 401, { code: 401, codeDescription: 'CLIENT_KEYS_UNAUTHORIZED', message: 'client keys are invalid' });
       return json(route, 200, { apiKey: jwt() });
     }
+    if (url.pathname === '/v2/items' && opts.listItems === 'forbidden') return json(route, 403, { code: 403, codeDescription: 'FORBIDDEN', message: 'This endpoint is not enabled for your team' });
+    if (url.pathname === '/v2/items' && opts.listItems === 'enabled') {
+      return json(route, 200, {
+        results: [
+          itemBody(ITEM_ID, mp),
+          { ...itemBody(SANDBOX_ITEM_ID, false), connector: { id: 8, name: 'Pluggy Bank', primaryColor: '000000', isOpenFinance: false, isSandbox: true, imageUrl: '' } },
+        ],
+        next: null,
+      });
+    }
     if (url.pathname === `/items/${ITEM_ID}`) {
       if (state.itemStatus !== 200) return json(route, state.itemStatus, { code: state.itemStatus, codeDescription: 'ITEM_NOT_FOUND', message: 'Item not found' });
-      return json(route, 200, {
-        id: ITEM_ID,
-        connector: mp
-          ? { id: 200, name: 'MeuPluggy', primaryColor: 'ef294b', isOpenFinance: false, isSandbox: false, imageUrl: '' }
-          : { id: 201, name: 'Banco Mock', primaryColor: '0f766e', isOpenFinance: true, isSandbox: false, imageUrl: '' },
-        status: 'UPDATED',
-        executionStatus: 'SUCCESS',
-        statusDetail: null,
-        error: null,
-        createdAt: day(-100),
-        updatedAt: day(0),
-        lastUpdatedAt: new Date(Date.now() - 3600_000).toISOString(),
-        nextAutoSyncAt: null,
-        consentExpiresAt: null,
-      });
+      return json(route, 200, itemBody(ITEM_ID, mp));
     }
     if (url.pathname === '/accounts') {
       return json(route, 200, {

@@ -23,6 +23,7 @@ import {
 } from '../models/finance';
 import { PluggyClient } from '../pluggy/client';
 import { oauthRedirectUriFor, openPluggyConnect } from '../pluggy/connect';
+import { type DiscoveryPlan, isDiscoveryUnavailable, planDiscovery } from '../pluggy/discovery';
 import { FRIENDLY_MESSAGES, PluggyError, toPluggyError } from '../pluggy/errors';
 import { fetchItemBundle, waitForItemReady } from '../pluggy/sync';
 import type { PluggyCategory } from '../pluggy/types';
@@ -185,7 +186,7 @@ export function startDemo(persist = true): void {
     categorization: emptyCategorization(),
     planned: [],
     itemIds: [],
-    sync: { status: 'idle', progress: null, lastSyncAt: new Date().toISOString(), errorKind: null, errorTitle: null, errorMessage: null },
+    sync: { status: 'idle', progress: null, blocking: false, lastSyncAt: new Date().toISOString(), errorKind: null, errorTitle: null, errorMessage: null },
   });
   if (persist) void updatePreferences({ mode: 'demo' });
 }
@@ -245,6 +246,8 @@ export async function configureCredentials(setup: CredentialSetup, opts: { enter
     },
   });
   await loadCache();
+  // Conta conectada: traz sozinho os Items que já existem na aplicação Pluggy (em segundo plano).
+  void discoverExistingItems();
 }
 
 /** Conclui o onboarding e entra no app (sincroniza se houver instituições). */
@@ -465,13 +468,21 @@ async function getResolver(): Promise<CategoryResolver> {
 let syncInFlight: Promise<void> | null = null;
 
 function setSync(patch: Partial<typeof store.state.sync>): void {
-  store.set({ sync: { ...store.state.sync, ...patch } });
+  const next = { ...store.state.sync, ...patch };
+  // A tela de carregamento só vale enquanto sincroniza: terminou (ou falhou), ela sai.
+  if (next.status !== 'syncing') next.blocking = false;
+  store.set({ sync: next });
 }
 
-/** "Atualizar agora": baixa novamente os dados de todos os Items da Pluggy. */
+/**
+ * "Atualizar agora": baixa novamente os dados de todos os Items da Pluggy.
+ * Com todos os Items (também ao entrar no app) cobre a tela com a tela de carregamento; a sincronização de um só
+ * Item (ao adicionar/reconectar uma instituição) já tem o próprio acompanhamento e segue discreta.
+ */
 export function syncAll(opts: { onlyItemId?: string } = {}): Promise<void> {
+  const blocking = !opts.onlyItemId;
   if (store.state.mode === 'demo') {
-    setSync({ status: 'syncing', progress: 'Atualizando dados de demonstração' });
+    setSync({ status: 'syncing', progress: 'Atualizando dados de demonstração', blocking });
     return new Promise((r) =>
       setTimeout(() => {
         setData({ baseDataset: buildDemoDataset() });
@@ -481,13 +492,13 @@ export function syncAll(opts: { onlyItemId?: string } = {}): Promise<void> {
     );
   }
   if (syncInFlight) return syncInFlight;
-  syncInFlight = runSync(opts.onlyItemId).finally(() => {
+  syncInFlight = runSync(opts.onlyItemId, blocking).finally(() => {
     syncInFlight = null;
   });
   return syncInFlight;
 }
 
-async function runSync(onlyItemId?: string): Promise<void> {
+async function runSync(onlyItemId: string | undefined, blocking: boolean): Promise<void> {
   const st = store.state;
   if (st.mode !== 'real' || !vault.isUnlocked()) return;
   if (!st.connection.hasCredentials) {
@@ -501,7 +512,7 @@ async function runSync(onlyItemId?: string): Promise<void> {
   const ids = onlyItemId ? [onlyItemId] : st.itemIds;
   if (!ids.length) return;
 
-  setSync({ status: 'syncing', progress: 'Autenticando na Pluggy', errorKind: null, errorTitle: null, errorMessage: null });
+  setSync({ status: 'syncing', progress: 'Autenticando na Pluggy', blocking, errorKind: null, errorTitle: null, errorMessage: null });
   const c = getClient();
   try {
     await c.authenticate();
@@ -583,18 +594,56 @@ export async function addItemById(rawId: string): Promise<void> {
   await syncAll({ onlyItemId: itemId });
 }
 
-/** Descobre Items da aplicação via GET /v2/items (recurso opt-in da Pluggy). */
+/** Lista os Items da aplicação (GET /v2/items, opt-in da Pluggy) e registra os que ainda não estão aqui. */
+async function registerDiscoveredItems(): Promise<DiscoveryPlan> {
+  const found = await getClient().listItems();
+  const plan = planDiscovery(found, store.state.itemIds, { includeSandbox: store.state.preferences.includeSandbox });
+  for (const id of plan.add) await registerItem(id);
+  return plan;
+}
+
+/** Busca manual ("Buscar Items"): devolve quantos Items novos entraram; os erros sobem para a tela mostrar. */
 export async function discoverItems(): Promise<number> {
-  const items = await getClient().listItems();
-  let added = 0;
-  for (const it of items) {
-    if (!store.state.itemIds.includes(it.id)) {
-      await registerItem(it.id);
-      added++;
-    }
+  const plan = await registerDiscoveredItems();
+  if (plan.add.length) await syncAll();
+  return plan.add.length;
+}
+
+let discoveryInFlight: Promise<void> | null = null;
+
+/**
+ * Depois de conectar a conta Pluggy: procura os Items que já existem na aplicação (Dashboard da Pluggy / Meu Pluggy)
+ * e adiciona os que ainda não estão aqui, sem o usuário precisar copiar o Item ID. Nunca lança: se a listagem não
+ * estiver habilitada (403) ou falhar, o app segue com o Pluggy Connect e o "Tenho um Item ID", que continuam valendo.
+ */
+export function discoverExistingItems(): Promise<void> {
+  if (discoveryInFlight) return discoveryInFlight;
+  discoveryInFlight = runDiscovery().finally(() => {
+    discoveryInFlight = null;
+  });
+  return discoveryInFlight;
+}
+
+async function runDiscovery(): Promise<void> {
+  const s = store.state;
+  if (s.mode === 'demo' || !s.connection.hasCredentials || !s.online || !vault.isUnlocked()) return;
+  store.set({ discovery: { status: 'running', found: 0, added: 0 } });
+  try {
+    const plan = await registerDiscoveredItems();
+    const added = plan.add.length;
+    store.set({ discovery: { status: added ? 'added' : 'none', found: plan.found, added } });
+    if (!added) return;
+    notify(
+      'success',
+      added === 1 ? 'Conexão encontrada na sua conta Pluggy' : `${added} conexões encontradas na sua conta Pluggy`,
+      `Já existiam na sua aplicação (Dashboard da Pluggy / Meu Pluggy) e foram adicionadas automaticamente.${plan.truncated ? ` Outras ${plan.truncated} ficaram de fora: adicione pelo Item ID.` : ''}`,
+    );
+    void syncAll();
+  } catch (e) {
+    const err = toPluggyError(e);
+    debugLog('discovery', 'busca automática de Items', err.kind);
+    store.set({ discovery: { status: isDiscoveryUnavailable(err.kind) ? 'unavailable' : 'failed', found: 0, added: 0 } });
   }
-  if (added) await syncAll();
-  return added;
 }
 
 /**

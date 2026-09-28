@@ -256,6 +256,23 @@ canvas {
   color: var(--text-3);
   text-align: center;
 }
+/* Tela de carregamento da sincronização ("Atualizar agora"): mesmo visual, por cima do app (acima dos modais, 100,
+   e abaixo dos avisos, 200, para o resultado da atualização aparecer). `backwards`: não segura a opacidade no fim
+   e deixa o fade de saída (.is-leaving) funcionar. */
+.splash.splash--sync {
+  z-index: 150;
+  animation: fade-in var(--t-med) var(--ease) backwards;
+}
+.splash--sync .splash__name {
+  font-size: clamp(1.5rem, 1.1rem + 1.8vw, 2.25rem);
+}
+.splash--sync .splash__hint {
+  min-height: 1.4em;
+  max-width: 42ch;
+}
+.splash--sync .btn {
+  margin-top: var(--s-2);
+}
 .splash.is-error .splash__bar,
 .splash.is-error .splash__mark::after {
   display: none;

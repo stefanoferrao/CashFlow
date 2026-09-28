@@ -6,6 +6,7 @@ import { destroyCharts, rethemeCharts, resizeCharts } from './charts/charts';
 import { html, render } from './components/dom';
 import { mountShell, type ShellHandle } from './components/shell';
 import { failSplash, hideSplash } from './components/splash';
+import { mountSyncOverlay } from './components/syncOverlay';
 import { mountToasts } from './components/toast';
 import { installTooltips } from './components/tooltip';
 import { navigate, parseHash, ROUTES, type PageModule } from './router';
@@ -82,6 +83,7 @@ async function renderScreen(mode: AppMode): Promise<void> {
 
 export async function startApp(): Promise<void> {
   mountToasts(document.getElementById('toasts')!);
+  mountSyncOverlay();
   installTooltips();
 
   store.subscribe((s, prev) => {

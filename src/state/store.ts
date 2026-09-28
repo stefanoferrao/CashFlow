@@ -22,10 +22,21 @@ export interface SyncState {
   status: 'idle' | 'syncing' | 'error';
   /** Etapa atual (ex.: "Banco X: transações"). */
   progress: string | null;
+  /** Sincronização de todas as instituições ("Atualizar agora", ao entrar no app): cobre a tela com a tela de carregamento. */
+  blocking: boolean;
   lastSyncAt: string | null;
   errorKind: PluggyErrorKind | null;
   errorTitle: string | null;
   errorMessage: string | null;
+}
+
+/** Busca automática dos Items que já existem na aplicação Pluggy (roda depois de conectar a conta). */
+export interface DiscoveryState {
+  status: 'idle' | 'running' | 'added' | 'none' | 'unavailable' | 'failed';
+  /** Items distintos devolvidos pela Pluggy. */
+  found: number;
+  /** Items registrados neste navegador pela busca. */
+  added: number;
 }
 
 export interface ConnectionState {
@@ -55,6 +66,7 @@ export interface AppState {
   preferences: UserPreferences;
   theme: { pref: ThemePref; resolved: 'light' | 'dark' };
   sync: SyncState;
+  discovery: DiscoveryState;
   connection: ConnectionState;
   online: boolean;
   /** Mudanças de dados (datasets/categorização) incrementam a versão. */
@@ -72,7 +84,8 @@ export const initialState = (): AppState => ({
   itemIds: [],
   preferences: { ...DEFAULT_PREFERENCES },
   theme: { pref: 'system', resolved: 'light' },
-  sync: { status: 'idle', progress: null, lastSyncAt: null, errorKind: null, errorTitle: null, errorMessage: null },
+  sync: { status: 'idle', progress: null, blocking: false, lastSyncAt: null, errorKind: null, errorTitle: null, errorMessage: null },
+  discovery: { status: 'idle', found: 0, added: 0 },
   connection: { hasCredentials: false, clientIdHint: null, status: 'unknown', lastError: null, vaultMode: null, persistent: true },
   online: typeof navigator === 'undefined' ? true : navigator.onLine,
   dataVersion: 0,

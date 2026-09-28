@@ -15,7 +15,7 @@
 | O Connect Token resolve sem expor o Secret? | **Não para este app.** O Connect Token só acessa `GET /items/:id` e uma versão reduzida de `GET /accounts?itemId`. Transações, faturas e investimentos exigem o `apiKey`, que exige o Secret. |
 | CORS permite chamadas do navegador? | **Sim — verificado empiricamente em 23/09/2026** a partir de uma origem arbitrária (`https://example.com`, navegador real): `POST /auth` (JSON, com preflight) e `GET` com header `X-API-KEY` (com preflight) retornam respostas legíveis. A documentação não fala de CORS, portanto isso pode mudar sem aviso: o app detecta bloqueio em tempo de execução e oferece um modo de *proxy local* (servidor do Vite rodando **na máquina do próprio usuário**, que só repassa requisições e não armazena nada). |
 | Webhooks? | **Inviáveis** sem backend (exigem uma URL HTTPS pública). O app usa sincronização sob demanda + consulta de status do Item. |
-| Listar os Items do usuário? | `GET /v2/items` existe, mas é **opt-in** (precisa ser habilitado pelo suporte da Pluggy). Por isso o app guarda localmente os IDs obtidos pelo Connect e permite colar IDs manualmente (fluxo Meu Pluggy). |
+| Listar os Items do usuário? | `GET /v2/items` existe, mas é **opt-in** (precisa ser habilitado pelo suporte da Pluggy). Confirmado na documentação (parâmetros `clientUserId`, `connectorId` e `after`; responde `403` enquanto não habilitado). Por isso o app tenta a listagem sozinho depois de conectar a conta (`discoverExistingItems`), trata 403/404 como "recurso indisponível" (sem erro) e, em qualquer caso, guarda localmente os IDs obtidos pelo Connect e permite colar IDs manualmente (fluxo Meu Pluggy). |
 
 ---
 

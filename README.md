@@ -90,8 +90,11 @@ salvo localmente e sincronizado.
 2. No Dashboard da Pluggy, vincule cada banco do Meu Pluggy à sua aplicação pelo conector **MeuPluggy** e copie o **Item ID**.
 3. No CashFlow: *Contas → Adicionar instituição → Tenho um Item ID*, cole o ID e clique em **Adicionar Item**.
 
-Se a sua aplicação tiver `GET /v2/items` habilitado (recurso opt-in da Pluggy), a opção **"Buscar automaticamente os Items da minha aplicação"**
-lista todos; se não tiver, o app explica e mantém o caminho manual.
+**Busca automática do Item ID:** ao conectar a conta (Client ID/Secret validados), o CashFlow consulta `GET /v2/items` e adiciona sozinho os
+Items que já existem na sua aplicação (Dashboard da Pluggy / Meu Pluggy), sem precisar copiar o ID. Ignora os que já estão no app e os
+conectores de teste (a menos que *Incluir conectores de teste* esteja ligado) e adiciona no máximo 20 de uma vez. Esse recurso é **opt-in da
+Pluggy** (vem desabilitado e responde 403 até o suporte habilitar): se não estiver ligado, o app avisa sem erro e o **"Tenho um Item ID"**
+continua funcionando como antes. A opção **"Buscar automaticamente os Items da minha aplicação"**, em *Adicionar instituição*, repete a busca.
 
 As conexões do Meu Pluggy chegam com o conector **"MeuPluggy"**, sem o nome do banco. O app identifica o banco pelos próprios dados
 (por exemplo, a conta "Nu Pagamentos S.A." indica Nubank) e usa o logo e a cor do catálogo oficial da Pluggy. Quando não dá para
@@ -201,7 +204,9 @@ Cada registro cifrado usa o identificador `store:id` como *additional authentica
 para outro lugar falha na autenticação.
 
 **Validade do cache:** padrão de 6 horas (configurável). Ao desbloquear com o cache válido, nenhuma chamada à Pluggy é feita;
-com o cache vencido, o app sincroniza. **"Atualizar agora"** força a sincronização a qualquer momento.
+com o cache vencido, o app sincroniza. **"Atualizar agora"** força a sincronização a qualquer momento. Enquanto atualiza todas as
+instituições (no botão do topo, no ícone do celular e ao entrar no app), uma **tela de carregamento em tela cheia** mostra a etapa atual;
+**"Continuar em segundo plano"** (ou Esc) a fecha e a atualização segue, com o andamento no topo da tela.
 As categorias da Pluggy ficam em cache por 7 dias.
 
 ---
@@ -386,7 +391,7 @@ Chamadas à API da Pluggy, ao Pluggy Connect e ao proxy local passam direto pela
 | Rendimento dos investimentos | Muitas instituições não informam o valor aplicado (ou repetem o saldo) | Movimentações do produto com histórico conferido; sem base confiável, o produto fica fora da conta |
 | Conexões repetidas | Cada consentimento cria um Item novo na Pluggy | `avoidDuplicates` + `clientUserId` fixo; reaproveita o Item existente; repetidas antigas ficam fora dos totais |
 | Histórico de transações | A Pluggy fornece até ~12 meses | Busca 365 dias para trás e lançamentos futuros até 400 dias |
-| Listar Items automaticamente | `GET /v2/items` é opt-in | Guarda IDs do Connect e aceita IDs colados |
+| Listar Items automaticamente | `GET /v2/items` é opt-in (403 até a Pluggy habilitar) | Tenta a busca sozinho ao conectar a conta; se não estiver habilitada, guarda os IDs do Connect e aceita IDs colados |
 | Items do Meu Pluggy | Não aceitam `PATCH /items/{id}` | Mensagem explicando que a atualização é feita pelo Meu Pluggy |
 | Banco de origem no Meu Pluggy | O conector "MeuPluggy" não informa de qual banco são os dados | Detecção pelos dados + personalização (nome, logo, cor) |
 | Fechamento/vencimento do cartão | Algumas instituições não informam (ou informam datas que não batem) | Você define os dias no cartão ou em Configurações → Cartões; eles têm prioridade |
