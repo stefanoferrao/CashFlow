@@ -1,9 +1,6 @@
-/**
- * Notas desta versão, embutidas no app. São exibidas em "Notas de Atualização" quando o GitHub não
- * responde (sem internet) ou enquanto a release ainda não foi publicada. O mesmo texto é usado na
- * release do GitHub (docs/RELEASE-1.3.1.md).
- */
-export const BUNDLED_RELEASE_NOTES = `Lançada em **30/09/2026**. Correção do "relogar toda hora": o bloqueio automático passou a reconhecer quando você está usando o app, as credenciais salvas ficam mais protegidas contra perda e "Bloquear agora" vale para todas as abas abertas.
+# Notas de Atualização — v1.3.1
+
+Lançada em **30/09/2026**. Correção do "relogar toda hora": o bloqueio automático passou a reconhecer quando você está usando o app, as credenciais salvas ficam mais protegidas contra perda e "Bloquear agora" vale para todas as abas abertas.
 
 ## Novidades
 
@@ -43,4 +40,4 @@ export const BUNDLED_RELEASE_NOTES = `Lançada em **30/09/2026**. Correção do 
 1. Publique a nova versão (o GitHub Pages faz o build automaticamente).
 2. Abra o CashFlow e recarregue a página (ou toque em **Atualizar agora** no aviso de nova versão).
 3. Seus dados e credenciais salvos **continuam os mesmos**: não há migração nem nova conexão. Digite a senha local quando o app pedir.
-4. Para digitar a senha menos vezes, abra **Configurações → Bloqueio automático** e escolha **30 ou 60 minutos**.`;
+4. Para digitar a senha menos vezes, abra **Configurações → Bloqueio automático** e escolha **30 ou 60 minutos**.

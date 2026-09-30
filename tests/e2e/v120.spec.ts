@@ -223,6 +223,6 @@ test.describe('Notas de Atualização', () => {
     await startDemo(page, { github: 'down' });
     await page.evaluate(() => (location.hash = '#/novidades'));
     await expect(page.locator('.callout--warn')).toBeVisible();
-    await expect(page.locator('.release--current')).toContainText('Limite do cartão correto');
+    await expect(page.locator('.release--current')).toContainText('Bloquear agora vale para todas as abas');
   });
 });
