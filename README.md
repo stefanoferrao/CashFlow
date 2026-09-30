@@ -172,7 +172,11 @@ Detalhes completos em [`SECURITY.md`](SECURITY.md).
 - Client Secret **cifrado em repouso** (AES-GCM-256) com chave derivada da senha local (PBKDF2-SHA256, 600.000 iterações).
 - Cache financeiro também cifrado com a mesma chave de dados.
 - **Nunca** em `localStorage`, cookies, URL, código-fonte, logs, DOM ou telemetria. Não há analytics nem telemetria.
-- Bloqueio automático por inatividade (padrão 15 min) descarta chaves e `apiKey` da memória.
+- Bloqueio automático por inatividade (padrão 15 min) descarta chaves e `apiKey` da memória. Contam como atividade mouse, rolagem, toque,
+  teclado e foco; voltar à aba depois do prazo bloqueia na hora (o tempo com a aba oculta conta como inatividade).
+- Como a chave só existe na memória, **reabrir, recarregar, abrir em outra aba/janela ou o navegador descartar a aba** pede a senha local de novo (por desenho).
+  A chave **não é compartilhada entre abas**: cada aba pede a própria senha (inclusive ao reabrir com todas as abas fechadas). Só o
+  **sinal de bloqueio** passa entre elas: *Bloquear agora* numa aba bloqueia as outras (sem chave, senha ou dados no canal).
 - CSP restritiva no build de produção; requisições com `credentials: 'omit'` e `referrerPolicy: 'no-referrer'`.
 - *Configurações → Segurança → Apagar todos os dados locais* remove tudo (IndexedDB, tema, sessão).
 
@@ -421,6 +425,8 @@ Chamadas à API da Pluggy, ao Pluggy Connect e ao proxy local passam direto pela
 | Categorias | Premium após o trial na Pluggy; podem vir nulas | Mapeamento por palavras-chave + ajustes do usuário |
 | Dados em outro dispositivo | Tudo é local | Cada navegador tem seu próprio cofre. As personalizações (nomes, ícones, datas dos cartões, dashboard…) se copiam com Exportar/Importar; os dados financeiros e as credenciais não |
 | Esqueceu a senha local | Não há recuperação (por desenho) | "Esqueci a senha local" apaga os dados locais para recomeçar |
+| Senha local pedida de novo | A chave de dados só vive na memória de cada aba (não é compartilhada entre abas): recarregar, reabrir o app (mesmo com todas as abas fechadas), abrir outra aba/janela, bloqueio por inatividade ou o navegador descartar a aba (economia de memória) exigem a senha | Escolha 30 ou 60 minutos em Configurações → Conta (o padrão continua 15); no Chrome ("Economia de memória") e no Edge ("Abas inativas"), adicione o site às exceções |
+| Credenciais "sumiram" | O navegador pode descartar o IndexedDB se faltar espaço (armazenamento "best-effort"); em falha passageira ao abrir o banco o app não o enxerga; a demonstração salva escondia o cofre; e trocar credenciais por valores errados sobrescrevia as boas | O app pede armazenamento persistente ao desbloquear, tenta abrir o banco 3 vezes e avisa quando não consegue (nada é apagado: recarregue a página); com cofre existente abre a tela de bloqueio em vez da demonstração; e, se a Pluggy recusar credenciais novas, restaura as anteriores |
 
 ---
 

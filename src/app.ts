@@ -128,5 +128,6 @@ export async function startApp(): Promise<void> {
   }
   document.documentElement.setAttribute('data-hide-values', String(store.state.preferences.hideValues));
   actions.startAutoLock();
+  actions.startLockSync();
   if (!location.hash) navigate('dashboard');
 }
