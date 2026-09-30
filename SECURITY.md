@@ -60,6 +60,27 @@ senha local ──PBKDF2-SHA256 (salt aleatório de 16 bytes, 600.000 iteraçõe
 - O `apiKey` fica só em memória e é renovado 5 min antes de expirar.
 - **Bloqueio** (manual ou automático por inatividade — padrão 15 min; opções 5/15/30/60 min ou nunca) descarta DEK, `apiKey`,
   credenciais em memória e a cópia decifrada do cache.
+  - Contam como atividade: mouse, rolagem, toque, teclado, digitação e foco na página. Voltar à aba/janela **não** é atividade:
+    se o prazo já venceu, o bloqueio acontece na hora (sem esperar o temporizador, que o navegador atrasa em aba oculta) e o
+    primeiro movimento depois do prazo também bloqueia em vez de renovar. O tempo com a aba oculta conta como inatividade.
+  - No modo **"Usar somente nesta sessão"** não há senha para desbloquear: o bloqueio por inatividade **encerra a sessão e
+    descarta as credenciais** (que só existiam na memória), e o aviso diz isso.
+- **Várias abas/janelas:** **a chave NÃO é compartilhada entre abas** (nem por `BroadcastChannel`, `localStorage` ou qualquer outro
+  meio): cada aba ou janela tem a própria chave em memória e pede a própria senha local; recarregar ou reabrir com todas as abas
+  fechadas também pede a senha. O único aviso que trafega entre abas é o **sinal de bloqueio** (`BroadcastChannel`, mesma origem,
+  mensagem `{ type: 'lock' }` — sem chave, senha, credencial ou dado): **Bloquear agora** numa aba bloqueia as demais abas com o
+  app aberto, sem retransmitir. O bloqueio por inatividade **não** propaga (cada aba tem o próprio prazo, para que uma aba
+  esquecida não bloqueie a que você está usando). Sem `BroadcastChannel` no navegador, nada disso acontece e nada falha.
+- **Trocar credenciais:** o app testa as novas na Pluggy e, se elas forem **recusadas** (`invalid_credentials`), restaura as anteriores
+  a partir de uma cópia do registro **ainda cifrado** feita antes da troca (nada é decifrado nem guardado em texto puro nesse
+  processo). Se nunca houve credenciais, as recusadas são descartadas. Em erros que não são de credencial (offline, instabilidade
+  da Pluggy) as novas ficam salvas, como antes. Se a restauração falhar, o app avisa e não apaga nada.
+- **Modo demonstração:** se já existe cofre neste navegador, o app abre a tela de bloqueio mesmo que a demonstração tenha sido
+  a última tela usada — a demonstração não "esconde" mais as credenciais salvas (continua disponível pela tela de bloqueio).
+- **Armazenamento persistente:** ao desbloquear/configurar o cofre, o app pede ao navegador (`navigator.storage.persist()`) que
+  não descarte o IndexedDB por falta de espaço. O pedido não grava nada e não altera o que é cifrado; o navegador decide.
+  Se o IndexedDB não puder ser aberto (mesmo após 3 tentativas), o app avisa e trabalha só em memória, sem apagar nada do que
+  já estava salvo.
 
 ### Superfície de ataque do código
 
@@ -147,6 +168,14 @@ Apagar no CashFlow **não** revoga nada na Pluggy. Para isso:
 - Não dá para zerar strings da memória do JavaScript.
 - Não há webhooks nem sincronização com o app fechado.
 - Não há recuperação de senha: se esquecer a senha local, os dados cifrados são irrecuperáveis (por desenho).
+- A chave de dados só vive na memória da aba (nunca é gravada): **recarregar, reabrir o app, abrir em outra aba/janela ou o
+  navegador descartar a aba** (economia de memória) exige a senha local de novo. Manter o cofre desbloqueado entre
+  recarregamentos exigiria guardar a chave no disco e enfraqueceria a proteção contra cópia do perfil do navegador (risco 5);
+  hoje isso não é feito.
+- **Risco residual (trocar credenciais em duas abas ao mesmo tempo):** não há trava entre abas em volta da troca. Se duas abas
+  tentarem "Trocar credenciais" quase juntas e a Pluggy recusar as duas, a restauração das anteriores pode se entrelaçar e as
+  credenciais recusadas podem ficar salvas (basta informá-las de novo em Configurações → Pluggy). Não afeta a cifragem nem
+  expõe nada; evite trocar credenciais em mais de uma aba ao mesmo tempo.
 - Não há controle de taxa do lado servidor: o app respeita os limites da Pluggy (fila com no máx. 3 requisições, `Retry-After` de 60 s).
 - O cabeçalho `frame-ancestors` (proteção contra clickjacking) não funciona via `<meta>`; configure-o no host, se possível.
 - Cada navegador/dispositivo tem seu próprio cofre; nada é sincronizado entre eles.
