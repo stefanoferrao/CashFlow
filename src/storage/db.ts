@@ -57,30 +57,54 @@ export function isPersistent(): boolean {
   return memoryFallback === null;
 }
 
+/**
+ * Uma falha passageira ao abrir o IndexedDB (ex.: arquivo do perfil momentaneamente travado por antivírus/backup)
+ * não pode virar "memória para sempre": o cofre pareceria inexistente e o app abriria o onboarding.
+ */
+export const DB_OPEN_ATTEMPTS = 3;
+export const DB_OPEN_RETRY_DELAYS_MS: readonly number[] = [200, 600];
+
+function openOnce(): Promise<IDBDatabase> {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      for (const name of STORES) {
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
+    req.onerror = () => reject(req.error ?? new Error('Falha ao abrir IndexedDB'));
+    req.onblocked = () => reject(new Error('IndexedDB bloqueado por outra aba'));
+  });
+}
+
+async function openWithRetry(): Promise<IDBDatabase> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < DB_OPEN_ATTEMPTS; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, DB_OPEN_RETRY_DELAYS_MS[attempt - 1] ?? 600));
+    try {
+      return await openOnce();
+    } catch (e) {
+      lastError = e;
+      // Acesso negado (ex.: armazenamento bloqueado nas configurações) não melhora com nova tentativa.
+      if ((e as { name?: string } | null)?.name === 'SecurityError') break;
+    }
+  }
+  throw lastError;
+}
+
 export async function openDb(): Promise<IDBDatabase | null> {
   if (memoryFallback) return null;
   if (typeof indexedDB === 'undefined') {
     useMemory();
     return null;
   }
-  if (!dbPromise) {
-    dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        for (const name of STORES) {
-          if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' });
-        }
-      };
-      req.onsuccess = () => {
-        const db = req.result;
-        db.onversionchange = () => db.close();
-        resolve(db);
-      };
-      req.onerror = () => reject(req.error ?? new Error('Falha ao abrir IndexedDB'));
-      req.onblocked = () => reject(new Error('IndexedDB bloqueado por outra aba'));
-    });
-  }
+  if (!dbPromise) dbPromise = openWithRetry();
   try {
     return await dbPromise;
   } catch {

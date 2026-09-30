@@ -30,6 +30,8 @@ import type { PluggyCategory } from '../pluggy/types';
 import { debugLog, setDebugLogging } from '../security/redact';
 import * as vault from '../security/vault';
 import { isWebCryptoAvailable } from '../security/crypto';
+import { type IdleLock, createIdleLock, inactivityNotice } from '../security/idleLock';
+import { createLockSync, peerLockNotice } from '../security/lockChannel';
 import { CategoryResolver } from '../services/categories';
 import { buildDemoDataset } from '../services/demoData';
 import { createSnapshot, calculateNetWorth, upsertSnapshot } from '../services/financialCalculator';
@@ -37,6 +39,7 @@ import { applyIdentities, sanitizeIdentity, sanitizeProductLogo, toHexColor, val
 import { DATA_MODEL_VERSION, type NormalizedItemData, mergeItemData, normalizeBundle, normalizeItem } from '../services/financialDataService';
 import { type UserConfig, buildUserConfig, mergeCategorization, mergeLabels, mergePlanned } from '../services/userConfig';
 import { deleteDatabase, isPersistent } from '../storage/db';
+import { requestPersistentStorage } from '../storage/persistence';
 import {
   type ThemePref,
   type UserPreferences,
@@ -106,6 +109,11 @@ export async function boot(): Promise<void> {
   const preferences = await loadPreferences();
   setDebugLogging(preferences.debug);
   store.set({ preferences });
+  // O primeiro acesso ao IndexedDB é o de cima: se ele falhou mesmo após as novas tentativas, o cofre existente não será
+  // encontrado nesta abertura. Sem este aviso parece que as credenciais sumiram.
+  if (!isPersistent()) {
+    notify('warn', 'Armazenamento local indisponível', 'Não foi possível abrir o banco de dados deste navegador (IndexedDB). Nada será salvo nesta aba. Se você já tinha credenciais salvas, elas não foram apagadas: recarregue a página para tentar de novo.');
+  }
   capturePendingConnect();
   if (preferences.mode === null && preferences.lastSeenVersion === null) {
     newInstall = true;
@@ -118,11 +126,13 @@ export async function boot(): Promise<void> {
     return;
   }
 
-  if (preferences.mode === 'demo') {
+  // Existe cofre: a tela de bloqueio vale mais que o "demo" salvo (que sem isto escondia as credenciais a cada abertura).
+  const hasVault = await vault.vaultExists();
+  if (preferences.mode === 'demo' && !hasVault) {
     startDemo(false);
     return;
   }
-  if (await vault.vaultExists()) {
+  if (hasVault) {
     store.set({ mode: 'locked', connection: { ...store.state.connection, hasCredentials: await vault.hasStoredCredentials(), persistent: isPersistent() } });
     return;
   }
@@ -263,18 +273,30 @@ export async function configureCredentials(setup: CredentialSetup, opts: { enter
     else await vault.createVault(setup.passphrase);
   }
 
-  const hadStored = setup.passphrase !== null && (await vault.hasStoredCredentials());
+  // Cópia cifrada do que já estava salvo: se a Pluggy recusar as novas, as boas voltam (e nada é decifrado nesse processo).
+  const previous = await vault.snapshotCredentials();
   await vault.saveCredentials(setup);
   resetClient();
   try {
     await getClient().testCredentials();
   } catch (e) {
     const err = toPluggyError(e);
-    if (err.kind === 'invalid_credentials' && !hadStored) await vault.removeCredentials();
-    store.set({ connection: { ...store.state.connection, status: 'error', lastError: err.message } });
+    let restored = false;
+    if (err.kind === 'invalid_credentials') {
+      try {
+        await vault.restoreCredentials(previous);
+        restored = previous !== null;
+      } catch {
+        notify('warn', 'Não foi possível restaurar as credenciais anteriores', 'As credenciais recusadas ficaram salvas. Informe-as novamente em Configurações → Pluggy.');
+      }
+      resetClient();
+    }
+    // Com as credenciais anteriores de volta, o status da conexão continua o de antes; o erro aparece para quem tentou a troca.
+    if (!restored) store.set({ connection: { ...store.state.connection, status: 'error', lastError: err.message } });
     throw err;
   }
   await updatePreferences({ mode: 'real' });
+  if (vault.getVaultMode() === 'passphrase') void requestPersistentStorage();
   store.set({
     ...(enter ? { mode: 'real' as const } : {}),
     connection: {
@@ -344,6 +366,7 @@ export async function unlockVault(passphrase: string): Promise<void> {
   await vault.unlock(passphrase);
   const hasCredentials = await vault.hasStoredCredentials();
   await updatePreferences({ mode: 'real' });
+  void requestPersistentStorage();
   store.set({
     mode: 'real',
     connection: {
@@ -361,13 +384,41 @@ export async function unlockVault(passphrase: string): Promise<void> {
   if (hasCredentials) void resumePendingConnect();
 }
 
-export function lockApp(reason: 'manual' | 'inactivity' = 'manual'): void {
+/**
+ * - 'manual': bloqueia e avisa as outras abas/janelas (só o sinal de bloqueio; nenhuma chave trafega).
+ * - 'inactivity': só esta aba (cada aba tem o próprio prazo; uma aba esquecida não pode bloquear a que está em uso).
+ * - 'peer': outra aba bloqueou; bloqueia sem retransmitir, para não entrar em loop.
+ */
+export function lockApp(reason: 'manual' | 'inactivity' | 'peer' = 'manual'): void {
   const wasSession = vault.getVaultMode() === 'session';
   vault.lock();
   resetClient();
   secureRepo.clearMemory();
   store.reset({ mode: wasSession ? 'onboarding' : 'locked', connection: { ...store.state.connection, clientIdHint: null, status: 'unknown', lastError: null, vaultMode: null } });
-  if (reason === 'inactivity') notify('info', 'Sessão bloqueada', 'Bloqueamos o app por inatividade. Seus dados continuam cifrados neste navegador.');
+  if (reason === 'manual') lockSync.broadcastLock();
+  if (reason === 'inactivity') {
+    const n = inactivityNotice(wasSession);
+    notify('info', n.title, n.message);
+  }
+  if (reason === 'peer') {
+    const n = peerLockNotice();
+    notify('info', n.title, n.message);
+  }
+}
+
+/** Canal de bloqueio entre abas. Só bloqueia quem está com o app aberto (demo, tela de bloqueio e onboarding ignoram). */
+const lockSync = createLockSync({
+  onPeerLock: () => {
+    if (store.state.mode === 'real') lockApp('peer');
+  },
+});
+
+export function startLockSync(): void {
+  lockSync.start();
+}
+
+export function stopLockSync(): void {
+  lockSync.stop();
 }
 
 export async function changePassphrase(current: string, next: string): Promise<void> {
@@ -1077,18 +1128,15 @@ export async function removePlannedEntry(id: string): Promise<void> {
 
 // ------------------------------------------------------------------ bloqueio automático
 
-let lastActivity = Date.now();
-let autoLockTimer: ReturnType<typeof setInterval> | null = null;
+let idleLock: IdleLock | null = null;
 
+/** Regras (eventos de atividade, volta à aba, prazo vencido) em security/idleLock.ts. Idempotente. */
 export function startAutoLock(): void {
-  const bump = () => {
-    lastActivity = Date.now();
-  };
-  for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart']) window.addEventListener(ev, bump, { passive: true });
-  if (autoLockTimer) clearInterval(autoLockTimer);
-  autoLockTimer = setInterval(() => {
-    const minutes = store.state.preferences.autoLockMinutes;
-    if (!minutes || store.state.mode !== 'real') return;
-    if (Date.now() - lastActivity > minutes * 60_000) lockApp('inactivity');
-  }, 15_000);
+  idleLock?.stop();
+  idleLock = createIdleLock({
+    getMinutes: () => store.state.preferences.autoLockMinutes,
+    isEnabled: () => store.state.mode === 'real',
+    onLock: () => lockApp('inactivity'),
+  });
+  idleLock.start();
 }

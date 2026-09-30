@@ -211,6 +211,29 @@ export async function saveCredentials(c: PluggyCredentials): Promise<void> {
   await idbPut('pluggy_credentials', record);
 }
 
+/** Cópia do registro de credenciais JÁ CIFRADO (nunca decifrado), para desfazer uma troca recusada pela Pluggy. */
+export interface CredentialsSnapshot {
+  blob: EncryptedBlob;
+  savedAt: string;
+}
+
+export async function snapshotCredentials(): Promise<CredentialsSnapshot | null> {
+  if (mode === 'session') return sessionCredentials ? { blob: sessionCredentials, savedAt: new Date().toISOString() } : null;
+  const rec = await idbGet<CredentialsRecord>('pluggy_credentials', 'credentials');
+  return rec ? { blob: rec.blob, savedAt: rec.savedAt } : null;
+}
+
+/** `null` = não havia credenciais antes: remove as atuais. */
+export async function restoreCredentials(snapshot: CredentialsSnapshot | null): Promise<void> {
+  if (!snapshot) return removeCredentials();
+  if (mode === 'session') {
+    sessionCredentials = snapshot.blob;
+    return;
+  }
+  const record: CredentialsRecord = { id: 'credentials', blob: snapshot.blob, savedAt: snapshot.savedAt };
+  await idbPut('pluggy_credentials', record);
+}
+
 /**
  * Executa `fn` com as credenciais decifradas. A referência não é guardada em lugar nenhum.
  * (Strings JS são imutáveis e não podem ser zeradas; minimizamos o tempo de vida.)

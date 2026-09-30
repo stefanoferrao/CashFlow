@@ -47,7 +47,7 @@ export function mount(ctx: PageContext): () => void {
     try {
       const est = await navigator.storage?.estimate?.();
       const persisted = await navigator.storage?.persisted?.();
-      if (est?.usage !== undefined) storageInfo = `${(est.usage / 1024 / 1024).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MB usados neste site${persisted ? ' · armazenamento persistente' : ''}`;
+      if (est?.usage !== undefined) storageInfo = `${(est.usage / 1024 / 1024).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MB usados neste site${persisted ? ' · armazenamento persistente' : persisted === false ? ' · armazenamento não persistente (o navegador pode descartá-lo se faltar espaço em disco)' : ''}`;
     } catch {
       storageInfo = '';
     }
@@ -81,7 +81,7 @@ export function mount(ctx: PageContext): () => void {
               ? ''
               : html`${row(
                   'Bloqueio automático',
-                  'Descarta chaves, credenciais e dados da memória após um período sem uso.',
+                  'Descarta chaves, credenciais e dados da memória após um período sem uso (mouse, rolagem e digitação contam como uso). Para digitar a senha menos vezes, escolha 30 ou 60 minutos. O Chrome ("Economia de memória") e o Edge ("Abas inativas") podem descartar abas em segundo plano; adicione este site às exceções do navegador para não precisar desbloquear de novo.',
                   html`<select class="select select--sm" data-change="autolock" style="width:auto">${[5, 15, 30, 60, 0].map((m) => html`<option value="${m}" ${s.preferences.autoLockMinutes === m ? 'selected' : ''}>${m ? `${m} minutos` : 'Nunca'}</option>`)}</select>`,
                 )}
                 ${row('Bloquear agora', 'Exige a senha local para voltar.', html`<button class="btn btn--secondary btn--sm" data-action="lock">${icon('lock')}${c.vaultMode === 'session' ? 'Encerrar sessão' : 'Bloquear'}</button>`)}`}
