@@ -1,0 +1,15 @@
+# Dependências
+node_modules/
+
+# Saída do build (o deploy gera o dist/ no CI — ver .github/workflows/deploy-pages.yml)
+dist/
+
+# Estado local do Maestri (agentes, papéis e notas)
+.maestri/
+
+# Variáveis de ambiente e arquivos locais: nunca versionar credenciais
+.env*
+*.local
+
+# Logs
+*.log
