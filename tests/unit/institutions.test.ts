@@ -16,6 +16,7 @@ import {
   resolveIdentity,
   searchConnectors,
   evidenceFor,
+  matchKnown,
 } from '../../src/services/institutions';
 import { nextDayOfMonth } from '../../src/utils/dates';
 import { BANK_ICONS, bankIcon, isAllowedLogoUrl, productIconFor, searchBankIcons } from '../../src/services/bankIcons';
@@ -294,6 +295,10 @@ describe('biblioteca local de ícones (react-bancos)', () => {
     expect(isAllowedLogoUrl('./banks/nubank.svg')).toBe(true);
     expect(isAllowedLogoUrl('./banks/nao-existe.svg')).toBe(false);
     expect(isAllowedLogoUrl('https://cdn.pluggy.ai/x.svg')).toBe(true);
+    // https de outro domínio (ex.: arquivo de personalização importado) faria o app chamar um servidor de terceiros.
+    expect(isAllowedLogoUrl('https://tracker.example/p.png?who=me')).toBe(false);
+    expect(isAllowedLogoUrl('https://cdn.pluggy.ai.evil.example/x.svg')).toBe(false);
+    expect(isAllowedLogoUrl('https://evilpluggy.ai/x.svg')).toBe(false);
     expect(isAllowedLogoUrl('http://exemplo.com/x.svg')).toBe(false);
     expect(isAllowedLogoUrl('javascript:alert(1)')).toBe(false);
     expect(isAllowedLogoUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(true);
@@ -321,5 +326,16 @@ describe('biblioteca local de ícones (react-bancos)', () => {
     const inherit = applyIdentities(ds, { ...labels, productLogos: { 'c-x': { bank: null, imageUrl: null, inherit: true } } }, []).cards.find((c) => c.id === 'c-x')!;
     expect(inherit.logo).toBeNull();
     expect(inherit.institutionColor).toBe('#820AD1');
+  });
+});
+
+describe('matchKnown — instituição mais específica vence', () => {
+  it('sub-marcas não são confundidas com o banco que aparece junto no nome', () => {
+    expect(matchKnown('iti Itaú')?.key).toBe('iti');
+    expect(matchKnown('Conta iti Itaú')?.key).toBe('iti');
+    expect(matchKnown('Credicard Itaú')?.key).toBe('credicard');
+    expect(matchKnown('Itaú Unibanco')?.key).toBe('itau');
+    expect(matchKnown('Banco Inter')?.key).toBe('inter');
+    expect(matchKnown('qualquer coisa')).toBeNull();
   });
 });
