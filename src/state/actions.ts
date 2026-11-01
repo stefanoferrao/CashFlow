@@ -277,7 +277,8 @@ export async function configureCredentials(setup: CredentialSetup, opts: { enter
   if (formatError) throw new Error(formatError);
 
   if (setup.passphrase === null) {
-    await vault.startEphemeralSession();
+    // Já em modo sessão: mantém a chave, para que as credenciais anteriores possam voltar se a Pluggy recusar as novas.
+    if (!(vault.isUnlocked() && vault.getVaultMode() === 'session')) await vault.startEphemeralSession();
   } else if (!vault.isUnlocked() || vault.getVaultMode() !== 'passphrase') {
     if (await vault.vaultExists()) await vault.unlock(setup.passphrase);
     else await vault.createVault(setup.passphrase);
@@ -459,6 +460,9 @@ export async function removeCredentials(): Promise<void> {
 
 /** "Apagar todos os dados locais": banco inteiro, preferências de tema e sessão. */
 export async function wipeAllLocalData(): Promise<void> {
+  endSessionWork();
+  // As outras abas também bloqueiam: o banco vai ser apagado e elas não devem seguir com a chave e os dados na tela.
+  lockSync.broadcastLock();
   vault.lock();
   resetClient();
   secureRepo.clearMemory();

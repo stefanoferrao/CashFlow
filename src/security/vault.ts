@@ -100,6 +100,12 @@ export function hasSessionCredentials(): boolean {
   return mode === 'session' && sessionCredentials !== null;
 }
 
+/**
+ * Muda a cada lock(). Operações lentas (PBKDF2 leva centenas de ms) conferem no fim se houve bloqueio
+ * no meio do caminho: um bloqueio nunca pode ser desfeito por uma derivação que terminou depois dele.
+ */
+let lockGeneration = 0;
+
 function requireDek(): CryptoKey {
   if (!dek) throw new VaultError('locked', 'O cofre local está bloqueado.');
   return dek;
@@ -110,6 +116,7 @@ export async function createVault(passphrase: string): Promise<void> {
   if (passphrase.length < APP_CONFIG.security.minPassphraseLength) {
     throw new VaultError('weak_passphrase', `A senha local precisa ter pelo menos ${APP_CONFIG.security.minPassphraseLength} caracteres.`);
   }
+  const generation = lockGeneration;
   const salt = randomBytes(16);
   const iterations = APP_CONFIG.security.pbkdf2Iterations;
   const kek = await deriveKek(passphrase, salt, iterations);
@@ -125,7 +132,9 @@ export async function createVault(passphrase: string): Promise<void> {
   };
   await idbPut('pluggy_credentials', meta);
   // A cópia usada em memória é NÃO extraível.
-  dek = await unwrapDek(wrapped, iv, kek, false);
+  const key = await unwrapDek(wrapped, iv, kek, false);
+  if (generation !== lockGeneration) throw new VaultError('locked', 'O app foi bloqueado durante a criação do cofre. Digite a senha local para entrar.');
+  dek = key;
   mode = 'passphrase';
   sessionCredentials = null;
   emit();
@@ -140,20 +149,25 @@ export async function startEphemeralSession(): Promise<void> {
 }
 
 export async function unlock(passphrase: string): Promise<void> {
+  const generation = lockGeneration;
   const meta = await idbGet<VaultMeta>('pluggy_credentials', 'vault');
   if (!meta) throw new VaultError('no_vault', 'Nenhum cofre local configurado neste navegador.');
   const kek = await deriveKek(passphrase, fromBase64(meta.kdf.salt), meta.kdf.iterations);
+  let key: CryptoKey;
   try {
-    dek = await unwrapDek(meta.wrappedDek, meta.wrapIv, kek, false);
+    key = await unwrapDek(meta.wrappedDek, meta.wrapIv, kek, false);
   } catch {
     throw new VaultError('wrong_passphrase', 'Senha local incorreta.');
   }
+  if (generation !== lockGeneration) throw new VaultError('locked', 'O app foi bloqueado durante o desbloqueio. Tente novamente.');
+  dek = key;
   mode = 'passphrase';
   emit();
 }
 
 /** Descarta chaves e credenciais da memória. */
 export function lock(): void {
+  lockGeneration++;
   dek = null;
   sessionCredentials = null;
   mode = null;
@@ -164,6 +178,7 @@ export async function changePassphrase(current: string, next: string): Promise<v
   if (next.length < APP_CONFIG.security.minPassphraseLength) {
     throw new VaultError('weak_passphrase', `A nova senha precisa ter pelo menos ${APP_CONFIG.security.minPassphraseLength} caracteres.`);
   }
+  const generation = lockGeneration;
   const meta = await idbGet<VaultMeta>('pluggy_credentials', 'vault');
   if (!meta) throw new VaultError('no_vault', 'Nenhum cofre local configurado.');
   const oldKek = await deriveKek(current, fromBase64(meta.kdf.salt), meta.kdf.iterations);
@@ -182,7 +197,9 @@ export async function changePassphrase(current: string, next: string): Promise<v
     wrappedDek: wrapped,
     wrapIv: iv,
   });
-  dek = await unwrapDek(wrapped, iv, newKek, false);
+  const key = await unwrapDek(wrapped, iv, newKek, false);
+  // Bloqueado durante a troca: a senha nova já vale, mas a chave continua descartada.
+  if (generation === lockGeneration) dek = key;
 }
 
 export function validateCredentialFormat(c: PluggyCredentials): string | null {
@@ -261,8 +278,13 @@ export async function getClientIdHint(): Promise<string | null> {
   }
 }
 
+/**
+ * Remove as credenciais do modo atual. No modo sessão elas só existem na memória da aba:
+ * as credenciais cifradas de um cofre deste navegador (de outra aba, por exemplo) não são tocadas.
+ */
 export async function removeCredentials(): Promise<void> {
   sessionCredentials = null;
+  if (mode === 'session') return;
   await idbDelete('pluggy_credentials', 'credentials');
 }
 
