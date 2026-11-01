@@ -1,46 +1,53 @@
 /**
  * Notas desta versão, embutidas no app. São exibidas em "Notas de Atualização" quando o GitHub não
  * responde (sem internet) ou enquanto a release ainda não foi publicada. O mesmo texto é usado na
- * release do GitHub (docs/RELEASE-1.3.1.md).
+ * release do GitHub (docs/RELEASE-1.4.0.md).
  */
-export const BUNDLED_RELEASE_NOTES = `Lançada em **30/09/2026**. Correção do "relogar toda hora": o bloqueio automático passou a reconhecer quando você está usando o app, as credenciais salvas ficam mais protegidas contra perda e "Bloquear agora" vale para todas as abas abertas.
+export const BUNDLED_RELEASE_NOTES = `Lançada em **01/11/2026**. Recategorizar agora pergunta se vale só para aquela transação ou para todas do mesmo estabelecimento. Esta versão também traz uma revisão das contas de faturas e parcelas, da sincronização e da segurança do cofre local.
 
 ## Novidades
 
-### Bloquear agora vale para todas as abas
-- Ao tocar em **Bloquear agora** numa aba ou janela, as outras abas com o CashFlow aberto também bloqueiam e pedem a senha local. Só o **sinal de bloqueio** passa entre elas: nenhuma chave, senha, credencial ou dado financeiro trafega entre as abas.
-- O bloqueio **por inatividade não se espalha**: cada aba tem o próprio prazo, então uma aba esquecida não bloqueia a que você está usando.
-
-### Armazenamento protegido contra descarte
-- Ao desbloquear o app, ele pede ao navegador que trate os dados deste site como **armazenamento persistente**, para que o cofre e as credenciais cifradas não sejam descartados quando faltar espaço em disco.
-- Em **Configurações** aparece se o armazenamento é persistente ou não. Quando não for, o aviso explica o risco.
+### Recategorizar por estabelecimento
+- Ao trocar a categoria de uma transação (por exemplo, um corte de cabelo que veio sem categoria), o app pergunta se a mudança vale **só para esta transação** ou para **todas do mesmo estabelecimento**, inclusive as próximas. A pergunta mostra quantas transações desse estabelecimento já existem.
+- O estabelecimento é o nome informado pela Pluggy. Quando ele não vem, o app usa a descrição sem números e termos genéricos: "BARBEARIA DO ZE 0312" e "BARBEARIA DO ZE 0410" contam como o mesmo lugar.
+- Recategorizar de novo o mesmo estabelecimento **substitui** a regra anterior. A regra mais recente vence as mais antigas. Se você já tinha regras que se sobrepõem (por exemplo, "barbearia" e "barbearia do zé"), agora vale a criada por último.
+- Transações que você já ajustou uma a uma continuam como estão.
+- Numa transação categorizada por regra, o botão **Remover regra** desfaz o "Todas".
+- As regras de estabelecimento vão junto ao **exportar e importar personalizações**.
 
 ## Correções
 
-### Bloqueio automático que não atrapalha
-- Antes, só clique, tecla, roda do mouse e toque contavam como uso. Agora também contam **movimento do mouse, rolagem, digitação e foco** na página.
-- Ao voltar para a aba depois do prazo, o app bloqueia **na hora**, sem esperar o relógio do navegador (que atrasa em aba oculta). O tempo com a aba oculta conta como inatividade.
-- Em **Configurações → Bloqueio automático**, o texto agora explica o que conta como uso e sugere **30 ou 60 minutos** para digitar a senha menos vezes. Também avisa que o Chrome ("Economia de memória") e o Edge ("Abas inativas") podem descartar abas em segundo plano e como evitar isso.
+### Faturas e parcelas
+- Cartão que fecha no dia **29, 30 ou 31**: uma compra feita no último dia do mês não entra mais em duas faturas.
+- Quando os dados do cartão estão alguns meses atrasados, as datas de fechamento e vencimento previstas não "encolhem" mais para o dia 28 ou 30.
+- Parcelas da mesma compra com centavos diferentes (por exemplo, R$ 10,50 e R$ 10,49) não são mais tratadas como duas compras. Antes, as parcelas previstas apareciam duplicadas.
+- Compras em outra moeda não são mais somadas ao valor da fatura em reais.
+- O saldo previsto não desconta mais a fatura duas vezes quando o pagamento dela já está agendado no banco.
+- Um lançamento previsto para **hoje** passa a contar nas receitas e despesas previstas do mês.
+- "Despesas do mês" no dashboard compara com o mesmo período do mês anterior usando o mesmo critério (incluindo lançamentos pendentes nos dois lados).
 
-### Credenciais que "sumiam" ao reabrir
-- Uma falha passageira ao abrir o banco de dados do navegador (IndexedDB), por exemplo com o arquivo do perfil momentaneamente travado por antivírus ou backup, fazia o app abrir como se as credenciais **não existissem** (tela de boas-vindas). Agora ele **tenta 3 vezes** e, se ainda não abrir, **avisa** que o armazenamento está indisponível. Nada é apagado: recarregar a página tenta de novo.
-- Se você já tinha credenciais salvas e o **modo demonstração** foi a última tela usada, o app abria a demonstração e escondia o cofre. Agora, **existindo cofre neste navegador, abre a tela de bloqueio** (a demonstração continua disponível por ela).
+### Sincronização ("Atualizar agora")
+- Adicionar uma instituição durante uma sincronização não deixa mais essa instituição sem dados. Tocar em "Atualizar agora" enquanto uma única instituição sincroniza também atualiza as outras. Esses pedidos agora rodam logo em seguida.
+- Uma instituição removida durante a sincronização não reaparece.
+- Um erro no armazenamento do navegador durante a sincronização não deixa mais a tela de carregamento presa: o app mostra o erro.
+- Com muitas contas na mesma instituição, as chamadas que aguardam na fila não estouram mais o tempo limite antes de serem enviadas.
+- Regras antigas de "aplicar a futuras transações com descrição semelhante" que não pegavam nem a própria transação voltam a funcionar.
+- O nome do banco é reconhecido com mais precisão: "iti Itaú" é iti e "Credicard Itaú" é Credicard.
 
-### Trocar credenciais por valores errados
-- Se a Pluggy **recusar** o Client ID ou o Client Secret novos, o app agora **restaura as credenciais anteriores** em vez de deixar as recusadas no lugar das boas. Se nunca houve credenciais, as recusadas são descartadas.
-- Em erro que não é de credencial (sem internet, instabilidade da Pluggy), as novas ficam salvas, como antes.
-
-### Aviso do modo "Usar somente nesta sessão"
-- Nesse modo não há senha para desbloquear. O aviso de inatividade dizia que "seus dados continuam cifrados", o que não era verdade. Agora diz que a **sessão foi encerrada e as credenciais foram descartadas** porque só existiam na memória da aba.
+### Importar personalizações
+- Um arquivo com uma categoria inválida não quebra mais a importação nem a tela da transação.
+- Um arquivo de uma versão antiga não apaga mais a organização atual do dashboard. A organização antiga fica de fora da importação, porque a grade mudou.
 
 ## Privacidade e segurança
-- **O modelo de segurança não mudou.** A chave de dados continua só na memória de cada aba e nunca é gravada. Por desenho, **recarregar, reabrir o app, abrir em outra aba ou janela ou o navegador descartar a aba** continua pedindo a senha local. A chave **não é compartilhada entre abas**.
-- A restauração de credenciais usa uma cópia do registro **ainda cifrado**, feita antes da troca: nada é decifrado nem guardado em texto puro nesse processo.
-- Nenhuma chamada de rede nova. O canal entre abas é local ao navegador (mesma origem) e só carrega o sinal de bloqueio.
-- **Limitação conhecida:** se você usar **Trocar credenciais** em duas abas ao mesmo tempo e a Pluggy recusar as duas, as credenciais recusadas podem ficar salvas. Basta informá-las de novo em Configurações → Pluggy. Evite trocar credenciais em mais de uma aba ao mesmo tempo.
+- **Bloquear durante a sincronização:** depois do bloqueio, nenhum dado novo é baixado, gravado ou mostrado. Antes, uma sincronização em andamento podia terminar e colocar dados na tela bloqueada.
+- **Bloquear durante a troca de senha local:** a chave não volta mais para a memória com o app bloqueado. A senha nova continua valendo.
+- **Modo "Usar somente nesta sessão":** credenciais recusadas pela Pluggy não apagam mais as credenciais cifradas de um cofre salvo neste navegador. As credenciais anteriores da sessão voltam.
+- **Apagar todos os dados locais** agora também bloqueia as outras abas abertas.
+- Logos vindos de um arquivo de personalização importado só são aceitos da Pluggy (\`*.pluggy.ai\`), da biblioteca local ou de imagem enviada. Assim, um arquivo compartilhado não faz o app carregar imagens de servidores de terceiros.
+- **O modelo de segurança não mudou.** Nenhuma chamada de rede nova.
 
 ## Como atualizar
 1. Publique a nova versão (o GitHub Pages faz o build automaticamente).
 2. Abra o CashFlow e recarregue a página (ou toque em **Atualizar agora** no aviso de nova versão).
-3. Seus dados e credenciais salvos **continuam os mesmos**: não há migração nem nova conexão. Digite a senha local quando o app pedir.
-4. Para digitar a senha menos vezes, abra **Configurações → Bloqueio automático** e escolha **30 ou 60 minutos**.`;
+3. Seus dados, credenciais e regras de categorização **continuam os mesmos**: não há migração nem nova conexão. Digite a senha local quando o app pedir.
+4. Para recategorizar por estabelecimento, abra **Transações**, toque numa transação, escolha a categoria e toque em **Salvar**.`;
