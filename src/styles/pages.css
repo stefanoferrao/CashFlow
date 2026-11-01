@@ -330,7 +330,7 @@ code {
   inset: -20%;
   background:
     radial-gradient(40% 35% at 20% 20%, rgba(82, 102, 235, 0.32), transparent 70%),
-    radial-gradient(35% 30% at 85% 75%, rgba(156, 180, 232, 0.2), transparent 70%);
+    radial-gradient(35% 30% at 85% 75%, rgba(82, 102, 235, 0.16), transparent 70%);
   z-index: -1;
 }
 .screen__aside .brand {
@@ -2145,4 +2145,20 @@ a.ob-row--btn:hover,
 .md a {
   color: var(--accent-text);
   text-decoration: underline;
+}
+
+/* Valores grandes nos cards do dashboard: a fonte acompanha a largura do card (Inter é mais larga que a
+   antiga DM Sans). Valores na casa das centenas de milhar ocupam ~6,5× o tamanho da fonte; 48px = padding do card. */
+.grid-stack-item-content {
+  container-type: inline-size;
+}
+.grid-stack-item-content .figure__value {
+  font-size: min(var(--fs-display), calc((100cqi - 48px) / 6.6));
+}
+.grid-stack-item-content .figure__value--hero {
+  font-size: min(var(--fs-hero), calc((100cqi - 48px) / 6.6));
+}
+/* Dentro de .split cada valor tem meia largura (menos o espaço entre as colunas). */
+.grid-stack-item-content .split .figure__value {
+  font-size: min(var(--fs-display), calc((50cqi - 32px) / 6.2));
 }

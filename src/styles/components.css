@@ -640,6 +640,9 @@
   font-size: var(--fs-sm);
   font-weight: 460;
   min-width: 0;
+  /* Card estreito: a palavra longa ("Previdência") quebra em vez de passar por baixo do valor. */
+  hyphens: auto;
+  overflow-wrap: anywhere;
 }
 .dist-row__value {
   font-size: var(--fs-sm);
@@ -1452,4 +1455,10 @@ button.list-item:hover {
 .cc__value {
   font-size: clamp(13px, 3.8vw, 16px);
   font-weight: 520;
+}
+
+/* Tema claro: a dica tem a mesma cor do trilho lateral "night"; um tom acima e um filete a separam dele. */
+:root:not([data-theme='dark']) .tooltip {
+  background: var(--night-raised-2);
+  box-shadow: 0 0 0 1px rgba(237, 237, 243, 0.1), 0 10px 28px -8px rgba(23, 23, 33, 0.45);
 }
