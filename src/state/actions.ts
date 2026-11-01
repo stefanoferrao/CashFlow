@@ -75,7 +75,14 @@ function getClient(): PluggyClient {
   return client;
 }
 
+/** Troca de credenciais/modo de acesso: o próximo uso cria um cliente novo; quem já tem o antigo segue funcionando. */
 function resetClient(): void {
+  client?.clearSession();
+  client = null;
+}
+
+/** Bloqueio/"apagar dados": o cliente antigo não faz mais nenhuma chamada (nem autentica de novo). */
+function disposeClient(): void {
   client?.dispose();
   client = null;
 }
@@ -88,6 +95,9 @@ let sessionEpoch = 0;
 
 function endSessionWork(): void {
   sessionEpoch++;
+  // A sincronização da sessão encerrada não pode "cobrir" pedidos da próxima: os pedidos novos começam do zero.
+  syncInFlight = null;
+  syncQueued = null;
 }
 
 /**
@@ -405,7 +415,7 @@ export function lockApp(reason: 'manual' | 'inactivity' | 'peer' = 'manual'): vo
   const wasSession = vault.getVaultMode() === 'session';
   endSessionWork();
   vault.lock();
-  resetClient();
+  disposeClient();
   secureRepo.clearMemory();
   store.reset({ mode: wasSession ? 'onboarding' : 'locked', connection: { ...store.state.connection, clientIdHint: null, status: 'unknown', lastError: null, vaultMode: null } });
   if (reason === 'manual') lockSync.broadcastLock();
@@ -465,7 +475,7 @@ export async function wipeAllLocalData(): Promise<void> {
   // As outras abas também bloqueiam: o banco vai ser apagado e elas não devem seguir com a chave e os dados na tela.
   lockSync.broadcastLock();
   vault.lock();
-  resetClient();
+  disposeClient();
   secureRepo.clearMemory();
   await deleteDatabase();
   try {
@@ -661,9 +671,12 @@ function queueSync(running: SyncRun, onlyItemId: string | undefined): Promise<vo
     onlyItemId,
     promise: Promise.resolve(),
   };
-  queued.promise = running.promise.then((): Promise<void> => {
-    if (syncQueued === queued) syncQueued = null;
-    return startSync(queued.full ? undefined : queued.onlyItemId, queued.full);
+  queued.promise = running.promise.then((): Promise<void> | void => {
+    // Fila descartada (bloqueio): nada a fazer.
+    if (syncQueued !== queued) return;
+    syncQueued = null;
+    // Pelo syncAll: se outra sincronização começou nesse meio-tempo e já cobre o pedido, reaproveita.
+    return syncAll(queued.full ? {} : { onlyItemId: queued.onlyItemId });
   });
   syncQueued = queued;
   return queued.promise;

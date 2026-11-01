@@ -9,7 +9,7 @@ import { badge, categoryIcon, categoryLabel, instLogo, money, stateBlock } from 
 import { APP_CONFIG } from '../config/app.config';
 import { APP_CATEGORIES, TRANSACTION_KIND_LABEL, type AppCategoryId, type NormalizedAccount, type NormalizedCard, type NormalizedTransaction } from '../models/finance';
 import type { PageContext } from '../router';
-import { DEFAULT_SUBCATEGORIES, countRuleReach, merchantOf } from '../services/categories';
+import { DEFAULT_SUBCATEGORIES, countRuleReach, merchantOf, ruleMatches } from '../services/categories';
 import { defaultFilters, filterTransactions, paginate, sortTransactions, summarizeTransactions, type SortKey, type TxFilters } from '../services/transactionQuery';
 import * as actions from '../state/actions';
 import { store } from '../state/store';
@@ -326,6 +326,8 @@ export function mount(ctx: PageContext): () => void {
     const uc = store.state.categorization;
     const subs = Array.from(new Set([...(DEFAULT_SUBCATEGORIES[t.category] ?? []), ...(uc.customSubcategories[t.category] ?? [])]));
     const merchant = merchantOf(t);
+    // Categoria vinda de uma regra (a mais recente que casa), quando não há ajuste só desta transação.
+    const appliedRule = uc.overrides[t.id]?.category ? undefined : [...uc.rules].reverse().find((r) => ruleMatches(r, t));
     const m = openModal({
       title: 'Transação',
       body: html`
@@ -350,12 +352,26 @@ export function mount(ctx: PageContext): () => void {
           <label class="switch"><input type="checkbox" name="ignored" ${t.ignored ? 'checked' : ''} /><span class="switch__track"></span><span>Ignorar nos cálculos (receitas, despesas e fluxo)</span></label>
           ${merchant ? html`<p class="field__hint">Ao trocar a categoria, você escolhe se vale só para esta transação ou para todas de “${merchant.label}”.</p>` : ''}
         </form>`,
-      footer: html`${t.userCategorized || uc.overrides[t.id] ? html`<button type="button" class="btn btn--ghost" data-reset>Desfazer ajustes</button>` : ''}
+      footer: html`${uc.overrides[t.id] ? html`<button type="button" class="btn btn--ghost" data-reset>Desfazer ajustes</button>` : ''}
+        ${appliedRule ? html`<button type="button" class="btn btn--ghost" data-remove-applied-rule>Remover regra</button>` : ''}
         <button type="button" class="btn btn--secondary" data-modal-close>Cancelar</button>
         <button type="button" class="btn btn--primary" data-save>${icon('check')}Salvar</button>`,
     });
     m.el.querySelector('[data-reset]')?.addEventListener('click', async () => {
       await actions.setTransactionOverride(t.id, null);
+      m.close();
+    });
+    m.el.querySelector('[data-remove-applied-rule]')?.addEventListener('click', async () => {
+      if (!appliedRule) return;
+      const name = appliedRule.match ? `todas de “${appliedRule.label ?? appliedRule.contains}”` : `descrição com “${appliedRule.contains}”`;
+      const ok = await confirmDialog({
+        title: 'Remover regra?',
+        message: `A regra “${categoryLabel(appliedRule.category)}” para ${name} deixa de valer. As transações voltam à categoria original (ajustes individuais são mantidos).`,
+        confirmLabel: 'Remover',
+        danger: true,
+      });
+      if (!ok) return;
+      await actions.removeCategoryRule(appliedRule.id);
       m.close();
     });
     m.el.querySelector('[data-save]')!.addEventListener('click', async () => {
@@ -400,7 +416,7 @@ export function mount(ctx: PageContext): () => void {
               (r) => html`<div class="list-item">${categoryIcon(r.category)}<span class="list-item__main"><span class="list-item__title">${r.match ? `Todas de “${r.label ?? r.contains}”` : `“${r.contains}”`}</span><span class="list-item__sub">${categoryLabel(r.category)}${r.subcategory ? ` · ${r.subcategory}` : ''}</span></span>
                 <button type="button" class="icon-btn icon-btn--sm" data-remove-rule="${r.id}" aria-label="Remover regra ${r.contains}">${icon('trash')}</button></div>`,
             )}</div>`
-          : stateBlock({ kind: 'empty', title: 'Nenhuma regra ainda', text: 'Crie regras ao editar uma transação.', compact: true })}
+          : stateBlock({ kind: 'empty', title: 'Nenhuma regra ainda', text: 'Ao trocar a categoria de uma transação, escolha “Todas” para criar uma regra do estabelecimento, ou crie uma aqui.', compact: true })}
         <form class="filters" data-rule-form style="align-items:end">
           <label class="field"><span class="field__label">Descrição contém</span><input class="input input--sm" name="contains" required maxlength="60" /></label>
           <label class="field"><span class="field__label">Categoria</span><select class="select select--sm" name="category">${APP_CATEGORIES.map((c) => html`<option value="${c.id}">${c.label}</option>`)}</select></label>

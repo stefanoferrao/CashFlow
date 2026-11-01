@@ -41,4 +41,28 @@ test.describe('Recategorizar por estabelecimento', () => {
     await expect(page.locator('.modal')).toHaveCount(0);
     await expect(page.locator('[data-action="open-tx"]:visible', { hasText: 'Lazer' })).toHaveCount(1);
   });
+
+  test('Esc fecha só a pergunta; a transação continua aberta', async ({ page }) => {
+    await startDemo(page);
+    await openAcademia(page);
+    await page.locator('.modal [data-cat-form] select[name="category"]').selectOption('lazer');
+    await page.locator('.modal [data-save]').click();
+    await expect(page.getByRole('heading', { name: 'Aplicar a nova categoria' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('heading', { name: 'Aplicar a nova categoria' })).toHaveCount(0);
+    await expect(page.locator('.modal [data-cat-form]')).toBeVisible();
+  });
+
+  test('"Remover regra" na transação desfaz o "Todas"', async ({ page }) => {
+    await startDemo(page);
+    await openAcademia(page);
+    await page.locator('.modal [data-cat-form] select[name="category"]').selectOption('lazer');
+    await page.locator('.modal [data-save]').click();
+    await page.locator('.modal [data-choice="all"]').click();
+    await page.locator('[data-action="open-tx"]:visible').first().click();
+    await page.locator('.modal [data-remove-applied-rule]').click();
+    await page.locator('.modal [data-confirm]').click();
+    await expect(page.locator('.modal')).toHaveCount(0);
+    await expect(page.locator('[data-action="open-tx"]:visible', { hasText: 'Lazer' })).toHaveCount(0);
+  });
 });

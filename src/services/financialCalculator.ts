@@ -854,7 +854,7 @@ function assignBillMonths(txs: NormalizedTransaction[], cycle: CardCycle, billBy
 function projectInstallments(txs: NormalizedTransaction[], months: Map<string, string>, fromMonth: string): ProjectedInstallment[] {
   // Parcelas da mesma compra: mesmo cartão, descrição, total de parcelas e data da compra. Sem a data da compra,
   // o valor da parcela separa compras diferentes — com tolerância, porque parcelas variam alguns centavos (10,50 / 10,49).
-  const series: Array<{ key: string; group: string; amount: number; last: NormalizedTransaction; month: string }> = [];
+  const series: Array<{ key: string; group: string; amount: number; numbers: Set<number>; last: NormalizedTransaction; month: string }> = [];
   for (const t of txs) {
     const inst = t.installment;
     if (!inst || inst.total < 2 || inst.number < 1 || inst.number > inst.total || t.amount >= 0) continue;
@@ -862,11 +862,17 @@ function projectInstallments(txs: NormalizedTransaction[], months: Map<string, s
     if (!month) continue;
     const amount = -t.amount;
     const group = [t.cardId, installmentBase(t.description), inst.total, t.purchaseDate ?? ''].join('|');
-    const cur = series.find((s) => s.group === group && (t.purchaseDate || Math.abs(s.amount - amount) <= Math.max(0.05, s.amount * 0.01)));
-    if (!cur) series.push({ key: t.purchaseDate ? group : `${group}${Math.round(amount * 100)}`, group, amount, last: t, month });
-    else if (inst.number > cur.last.installment!.number) {
-      cur.last = t;
-      cur.month = month;
+    // A mesma parcela (ex.: duas "1/3") não se repete numa compra: com o número já visto, é outra compra.
+    const cur = series.find(
+      (s) => s.group === group && !s.numbers.has(inst.number) && (t.purchaseDate || Math.abs(s.amount - amount) <= Math.max(0.05, s.amount * 0.01)),
+    );
+    if (!cur) series.push({ key: t.purchaseDate ? group : `${group}${Math.round(amount * 100)}`, group, amount, numbers: new Set([inst.number]), last: t, month });
+    else {
+      cur.numbers.add(inst.number);
+      if (inst.number > cur.last.installment!.number) {
+        cur.last = t;
+        cur.month = month;
+      }
     }
   }
   const from = monthIndex(fromMonth);
@@ -1179,13 +1185,15 @@ export function buildProjectionEvents(input: {
     if (remaining > 0) events.push({ date: b.dueDate, amount: -remaining, label: 'Fatura fechada a pagar', kind: 'bill', certainty: 'confirmed', origin: 'bill' });
   }
 
-  // Pagamento de fatura já agendado no banco: a fatura correspondente (mesma data, ±5 dias) já está acima.
-  const billDates = events.filter((e) => e.kind === 'bill').map((e) => e.date);
+  // Pagamento de fatura já agendado no banco: a fatura correspondente (±5 dias, mesmo valor) já está acima.
+  const billEvents = events.filter((e) => e.kind === 'bill');
+  const isScheduledBillPayment = (t: NormalizedTransaction) =>
+    billEvents.some((e) => Math.abs(diffDays(e.date, t.date)) <= 5 && Math.abs(Math.abs(e.amount) - Math.abs(t.amount)) <= Math.max(1, Math.abs(e.amount) * 0.05));
   for (const t of input.transactions) {
     if (t.source !== 'bank' || t.currency !== base || t.ignored) continue;
     if (t.date <= today || t.date > end) continue;
     if (t.kind === 'internal_transfer') continue;
-    if (t.kind === 'card_payment' && billDates.some((d) => Math.abs(diffDays(d, t.date)) <= 5)) continue;
+    if (t.kind === 'card_payment' && isScheduledBillPayment(t)) continue;
     events.push({ date: t.date, amount: t.amount, label: t.description, kind: t.amount >= 0 ? 'income' : 'expense', certainty: 'confirmed', origin: 'scheduled' });
   }
 

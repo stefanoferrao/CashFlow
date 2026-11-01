@@ -218,26 +218,57 @@ export function merchantOf(tx: Pick<NormalizedTransaction, 'merchant' | 'descrip
   return key.length >= 3 ? { match: 'similar', key, label: tx.description.trim().slice(0, RULE_TEXT_MAX) } : null;
 }
 
-/** A regra vale para esta transação? */
-export function ruleMatches(rule: CategoryRule, tx: Pick<NormalizedTransaction, 'merchant' | 'description'>): boolean {
+type MatchableTx = Pick<NormalizedTransaction, 'merchant' | 'description'>;
+
+/** Chaves de uma transação, calculadas uma vez e só quando alguma regra precisa delas. */
+class TxKeys {
+  private _desc?: string;
+  private _similar?: string;
+  private _key?: string;
+  private _merchant?: string | null;
+  constructor(private readonly tx: MatchableTx) {}
+  get desc(): string {
+    return (this._desc ??= normalizeText(this.tx.description));
+  }
+  get key(): string {
+    return (this._key ??= descriptionKey(this.tx.description));
+  }
+  get similar(): string {
+    return (this._similar ??= this.key.slice(0, RULE_TEXT_MAX).trim());
+  }
+  get merchant(): string | null {
+    if (this._merchant === undefined) this._merchant = this.tx.merchant ? merchantKey(this.tx.merchant) : null;
+    return this._merchant;
+  }
+}
+
+/** Prepara a regra uma vez (o texto normalizado não muda entre transações). */
+function compileRule(rule: CategoryRule): ((k: TxKeys) => boolean) | null {
   const needle = rule.contains.trim();
-  if (!needle) return false;
-  if (rule.match === 'merchant') return !!tx.merchant && merchantKey(tx.merchant) === needle;
-  if (rule.match === 'similar') return similarKey(tx.description) === needle;
+  if (!needle) return null;
+  if (rule.match === 'merchant') return (k) => k.merchant === needle;
+  if (rule.match === 'similar') return (k) => k.similar === needle;
   const n = normalizeText(needle);
-  if (normalizeText(tx.description).includes(n)) return true;
   // Regras antigas de "aplicar a futuras" guardavam a descrição já sem termos genéricos ("barbearia ze"),
   // que não aparece na descrição original ("BARBEARIA DO ZE"): compara também nesse formato.
-  const k = descriptionKey(needle);
-  return k.length >= 3 && k === n && descriptionKey(tx.description).includes(k);
+  const legacy = descriptionKey(needle);
+  const useLegacy = legacy.length >= 3 && legacy === n;
+  return (k) => k.desc.includes(n) || (useLegacy && k.key.includes(legacy));
+}
+
+/** A regra vale para esta transação? */
+export function ruleMatches(rule: CategoryRule, tx: MatchableTx): boolean {
+  return compileRule(rule)?.(new TxKeys(tx)) ?? false;
 }
 
 /** Quantas transações uma regra alcança e quantas delas têm ajuste individual (que continua valendo). */
 export function countRuleReach(transactions: NormalizedTransaction[], rule: CategoryRule, uc: UserCategorization): { total: number; keptByOverride: number } {
   let total = 0;
   let keptByOverride = 0;
+  const matches = compileRule(rule);
+  if (!matches) return { total, keptByOverride };
   for (const tx of transactions) {
-    if (!ruleMatches(rule, tx)) continue;
+    if (!matches(new TxKeys(tx))) continue;
     total++;
     if (uc.overrides[tx.id]?.category) keptByOverride++;
   }
@@ -251,7 +282,10 @@ export function countRuleReach(transactions: NormalizedTransaction[], rule: Cate
 export function applyUserCategorization(transactions: NormalizedTransaction[], uc: UserCategorization): NormalizedTransaction[] {
   if (!uc.rules.length && !Object.keys(uc.overrides).length) return transactions;
   // A regra criada por último vence: recategorizar de novo um estabelecimento muda de fato a categoria.
-  const rules = uc.rules.filter((r) => r.contains.trim().length > 0).reverse();
+  const rules = uc.rules
+    .map((r) => ({ rule: r, matches: compileRule(r) }))
+    .filter((r): r is { rule: CategoryRule; matches: (k: TxKeys) => boolean } => r.matches !== null)
+    .reverse();
   return transactions.map((tx) => {
     const ov = uc.overrides[tx.id];
     let category = tx.category;
@@ -262,7 +296,8 @@ export function applyUserCategorization(transactions: NormalizedTransaction[], u
       subcategory = ov.subcategory ?? null;
       changed = true;
     } else if (rules.length) {
-      const rule = rules.find((r) => ruleMatches(r, tx));
+      const keys = new TxKeys(tx);
+      const rule = rules.find((r) => r.matches(keys))?.rule;
       if (rule) {
         category = rule.category;
         subcategory = rule.subcategory;

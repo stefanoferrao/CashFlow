@@ -4,7 +4,7 @@
  * "Atualizar agora" ainda está baixando dados da Pluggy.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { freshApp, installFakeDom, setupUnlockedVault, uninstallFakeDom, type App } from './helpers/authHarness';
+import { PASS, freshApp, installFakeDom, setupUnlockedVault, uninstallFakeDom, type App } from './helpers/authHarness';
 
 const A = 'aaaaaaaa-0000-4000-8000-000000000001';
 const B = 'bbbbbbbb-0000-4000-8000-000000000002';
@@ -192,5 +192,45 @@ describe('syncAll: falha inesperada de armazenamento', () => {
     expect(app.store.state.sync.status).toBe('error');
     expect(app.store.state.sync.blocking).toBe(false);
     app.repo.secureRepo.getAll = orig;
+  });
+});
+
+describe('syncAll: depois de bloquear e desbloquear', () => {
+  it('a sincronização pedida na sessão nova roda, mesmo com a da sessão anterior ainda presa na rede', async () => {
+    await setupUnlockedVault(app);
+    await register(A);
+    await app.actions.syncAll();
+    const before = fetchedAccountsOf(A);
+    gate = new Promise((r) => (release = r));
+    const dead = app.actions.syncAll();
+    await tick();
+    app.actions.lockApp('manual');
+    await app.actions.unlockVault(PASS);
+    gate = null;
+    // No harness o cache fica só em memória (limpo no bloqueio); com IndexedDB o Item continuaria registrado.
+    await register(A);
+    const fresh = app.actions.syncAll();
+    await fresh;
+    release();
+    await dead;
+    expect(fetchedAccountsOf(A)).toBe(before + 2);
+    expect(app.store.state.sync.status).toBe('idle');
+    expect(app.store.state.sync.lastSyncAt).not.toBeNull();
+    expect(app.store.state.dataset.accounts).toHaveLength(1);
+  });
+});
+
+describe('syncAll: testar a conexão durante a sincronização de um item', () => {
+  it('não derruba a sincronização em andamento com um erro falso', async () => {
+    await setupUnlockedVault(app);
+    await register(A);
+    gate = new Promise((r) => (release = r));
+    const s = app.actions.syncAll({ onlyItemId: A });
+    await tick();
+    await app.actions.testConnection();
+    release();
+    await s;
+    expect(app.store.state.sync.status).toBe('idle');
+    expect(app.store.state.dataset.items.find((i) => i.id === A)?.syncState).not.toBe('error');
   });
 });

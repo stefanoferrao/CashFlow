@@ -74,6 +74,17 @@ describe('calculateCurrentBills — parcelas e moeda', () => {
     expect(nov?.count).toBe(1);
   });
 
+  it('duas compras "1/3" de valores próximos na mesma loja não viram uma só', () => {
+    const c = card({ closingDate: '2026-09-28', dueDate: '2026-10-05' });
+    const txs = [
+      cardTx({ amount: -100, date: '2026-09-10', description: 'LOJA X PARC 1/3', installment: { number: 1, total: 3 } }),
+      cardTx({ amount: -100.9, date: '2026-09-12', description: 'LOJA X PARC 1/3', installment: { number: 1, total: 3 } }),
+    ];
+    const s = calculateCurrentBills([c], txs, [], '2026-09-15')[0]!;
+    expect(s.upcoming.find((u) => u.month === '2026-11')?.total).toBe(200.9);
+    expect(s.upcoming.find((u) => u.month === '2026-12')?.total).toBe(200.9);
+  });
+
   it('compras diferentes na mesma loja seguem separadas', () => {
     const c = card({ closingDate: '2026-09-28', dueDate: '2026-10-05' });
     const txs = [
@@ -100,6 +111,14 @@ describe('projeção de saldo e mês', () => {
     const s = calculateCurrentBills([c], txs, [], '2026-09-15');
     const ev = buildProjectionEvents({ today: '2026-09-15', days: 30, transactions: txs, billSummaries: s, bills: [], recurrences: [], planned: [], includeEstimates: false });
     expect(calculateProjectedBalance(5000, '2026-09-15', 30, ev).end).toBe(4000);
+  });
+
+  it('pagamento agendado de outro valor (outro cartão) continua no saldo previsto', () => {
+    const c = card({ closingDate: '2026-09-28', dueDate: '2026-10-05' });
+    const txs = [cardTx({ amount: -1000, date: '2026-09-10' }), tx({ kind: 'card_payment', amount: -300, date: '2026-10-04', status: 'pending', description: 'PAGTO FATURA OUTRO' })];
+    const s = calculateCurrentBills([c], txs, [], '2026-09-15');
+    const ev = buildProjectionEvents({ today: '2026-09-15', days: 30, transactions: txs, billSummaries: s, bills: [], recurrences: [], planned: [], includeEstimates: false });
+    expect(calculateProjectedBalance(5000, '2026-09-15', 30, ev).end).toBe(3700);
   });
 
   it('lançamento previsto para hoje entra no esperado do mês', () => {

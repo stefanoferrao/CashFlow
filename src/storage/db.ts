@@ -75,10 +75,11 @@ function openOnce(): Promise<IDBDatabase> {
     };
     req.onsuccess = () => {
       const db = req.result;
-      db.onversionchange = () => {
-        // Outra aba vai apagar/atualizar o banco: fecha e esquece esta conexão, para a próxima chamada abrir de novo.
+      db.onversionchange = (e) => {
         db.close();
-        dbPromise = null;
+        // Outra aba apagou o banco ("Apagar todos os dados locais"): esquece a conexão, para a próxima chamada abrir de novo.
+        // Atualização de versão por uma aba mais nova: reabrir com a versão antiga falharia; esta aba precisa recarregar.
+        if (e.newVersion === null) dbPromise = null;
       };
       resolve(db);
     };

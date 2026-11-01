@@ -53,6 +53,9 @@ export function openModal(opts: {
 
   const onKey = (e: KeyboardEvent) => {
     if (!document.body.contains(backdrop)) return;
+    // Com modais empilhados (ex.: pergunta sobre a transação aberta), só o de cima responde ao teclado.
+    const open = root.querySelectorAll('.modal-backdrop');
+    if (open[open.length - 1] !== backdrop) return;
     if (e.key === 'Escape') {
       e.stopPropagation();
       close();

@@ -240,8 +240,15 @@ export async function snapshotCredentials(): Promise<CredentialsSnapshot | null>
   return rec ? { blob: rec.blob, savedAt: rec.savedAt } : null;
 }
 
-/** `null` = não havia credenciais antes: remove as atuais. */
+/**
+ * `null` = não havia credenciais antes: remove as atuais. No modo sessão elas só existem na memória da aba:
+ * as credenciais cifradas de um cofre deste navegador (de outra aba, por exemplo) não são tocadas.
+ */
 export async function restoreCredentials(snapshot: CredentialsSnapshot | null): Promise<void> {
+  if (!snapshot && mode === 'session') {
+    sessionCredentials = null;
+    return;
+  }
   if (!snapshot) return removeCredentials();
   if (mode === 'session') {
     sessionCredentials = snapshot.blob;
@@ -278,13 +285,8 @@ export async function getClientIdHint(): Promise<string | null> {
   }
 }
 
-/**
- * Remove as credenciais do modo atual. No modo sessão elas só existem na memória da aba:
- * as credenciais cifradas de um cofre deste navegador (de outra aba, por exemplo) não são tocadas.
- */
 export async function removeCredentials(): Promise<void> {
   sessionCredentials = null;
-  if (mode === 'session') return;
   await idbDelete('pluggy_credentials', 'credentials');
 }
 
