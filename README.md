@@ -258,6 +258,10 @@ Categorias do app: Moradia, Alimentação, Transporte, Saúde, Educação, Lazer
 Transferências, Receitas e Outros, com subcategorias. O mapeamento usa a árvore oficial de `/categories` da Pluggy e, na falta dela,
 palavras-chave. Ajustes e regras do usuário ficam só neste navegador.
 
+Ao trocar a categoria de uma transação, o app pergunta se vale **só para ela** ou para **todas do mesmo estabelecimento**,
+inclusive as próximas. O estabelecimento é o informado pela Pluggy (`merchant`) ou, sem ele, a descrição sem números e termos
+genéricos (`BARBEARIA DO ZE 0312` → `barbearia ze`). A regra mais recente vence; ajustes feitos em uma única transação têm prioridade.
+
 ---
 
 ## Cálculos financeiros
@@ -330,7 +334,7 @@ reconstruídos: a Pluggy só informa o valor atual deles, e estimar o passado mo
 - **Contas** — saldos por instituição, histórico reconstruído, status de sincronização de cada Item, atualizar/reconectar/remover.
 - **Cartões** — **próxima fatura somando todos os cartões** e a parte de cada um; limites, % usado, melhor dia de compra, fechamento, vencimento, fatura atual e seguinte; dias de fechamento e vencimento definidos por você; logo próprio de cada cartão.
 - **Faturas** — próxima fatura de todos os cartões (lista que também escolhe o cartão) e faturas seguintes somadas; por cartão: previsão (lançado + futuro + parcelas previstas), "Se você continuar gastando neste ritmo…", evolução diária, próximas faturas e fechadas.
-- **Transações** — busca instantânea (sem acento), filtros por período, conta, cartão, instituição, categoria, tipo e valor, ordenação e paginação; recategorização e regras.
+- **Transações** — busca instantânea (sem acento), filtros por período, conta, cartão, instituição, categoria, tipo e valor, ordenação e paginação; recategorização (só esta transação ou todas do estabelecimento) e regras.
 - **Investimentos** — rendimento acumulado (aplicado × valor atual, bruto e líquido), cobertura do cálculo e a base de cada produto; por classe, instituição e produto; produtos sem base listados com o motivo (nada é estimado).
 - **Fluxo de Caixa** — Mês, Trimestre, Ano e Todo o período (com navegação ‹ ›), taxa de poupança, projeção 7–90 dias, lançamentos previstos.
 - **Análises** — indicadores e insights baseados apenas nos seus dados, cada um com a base de cálculo; patrimônio ao longo do tempo (saldo reconstruído + registros); sem recomendações de investimento.
