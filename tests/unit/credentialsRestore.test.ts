@@ -162,8 +162,14 @@ describe('configureCredentials com a Pluggy recusando as credenciais novas (inva
     expect(app.store.state.connection.lastError).toBeTruthy();
   });
 
-  it('modo sessão: a sessão nova não tem credenciais prévias — recusa remove e marca erro (como hoje)', async () => {
+  it('modo sessão: trocar por credenciais recusadas devolve as da sessão atual (a chave da sessão não é trocada)', async () => {
     await app.actions.configureCredentials({ clientId: CLIENT_ID, clientSecret: GOOD_SECRET, passphrase: null });
+    await expect(app.actions.configureCredentials({ clientId: CLIENT_ID, clientSecret: BAD_SECRET, passphrase: null })).rejects.toMatchObject({ kind: 'invalid_credentials' });
+    expect(app.vault.hasSessionCredentials()).toBe(true);
+    await expect(currentSecret(app)).resolves.toBe(GOOD_SECRET);
+  });
+
+  it('modo sessão sem credenciais prévias: recusa descarta as novas e marca erro', async () => {
     await expect(app.actions.configureCredentials({ clientId: CLIENT_ID, clientSecret: BAD_SECRET, passphrase: null })).rejects.toMatchObject({ kind: 'invalid_credentials' });
     expect(app.vault.hasSessionCredentials()).toBe(false);
     expect(app.store.state.connection.status).toBe('error');

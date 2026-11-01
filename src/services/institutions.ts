@@ -119,11 +119,25 @@ export function iconOfKnown(k: KnownInstitution | null | undefined): BankIcon | 
   return k ? bankIcon(KNOWN_ICON[k.key]) : null;
 }
 
+/**
+ * Instituição conhecida citada no texto. Com mais de uma, vence o trecho mais longo (o mais específico):
+ * "iti Itaú" é iti e "Credicard Itaú" é Credicard, não Itaú. Empate: a primeira da lista.
+ */
 export function matchKnown(text: string | null | undefined): KnownInstitution | null {
   const t = norm(text);
   if (!t) return null;
-  for (const k of KNOWN_INSTITUTIONS) if (k.patterns.some((p) => p.test(t))) return k;
-  return null;
+  let best: KnownInstitution | null = null;
+  let bestLen = 0;
+  for (const k of KNOWN_INSTITUTIONS) {
+    for (const p of k.patterns) {
+      const len = p.exec(t)?.[0].length ?? 0;
+      if (len > bestLen) {
+        best = k;
+        bestLen = len;
+      }
+    }
+  }
+  return best;
 }
 
 export interface Evidence {

@@ -25,6 +25,7 @@ import {
   type DateKey,
   addDays,
   addMonths,
+  addMonthsAnchored,
   diffDays,
   eachDay,
   monthEnd,
@@ -645,6 +646,8 @@ export interface CardCycle {
   estimated: boolean;
   /** Origem das datas: dias definidos pelo usuário, instituição ou histórico de faturas. */
   source: 'institution' | 'user' | 'history';
+  /** Dia do mês em que a fatura fecha (âncora para meses curtos: 31 vira 30/28/29 sem se perder). */
+  closingDay?: number;
 }
 
 const validDayOf = (d: number | null | undefined): number | null => (typeof d === 'number' && Number.isInteger(d) && d >= 1 && d <= 31 ? d : null);
@@ -665,6 +668,8 @@ export function getCardCycle(card: NormalizedCard, bills: NormalizedBill[], toda
   let due: DateKey | null = null;
   let estimated = false;
   let source: CardCycle['source'] = 'institution';
+  /** Meses já somados a partir das datas de referência (histórico). */
+  let step = 0;
 
   if (manualClosing) {
     closing = nextDayOfMonth(today, manualClosing);
@@ -686,18 +691,26 @@ export function getCardCycle(card: NormalizedCard, bills: NormalizedBill[], toda
     } else {
       const lastClosed = [...cardBills].reverse().find((b) => b.closingDate && b.closingDate < today);
       if (!lastClosed?.closingDate) return null;
-      closing = addMonths(lastClosed.closingDate, 1);
-      due = addMonths(lastClosed.dueDate, 1);
+      closing = lastClosed.closingDate;
+      due = lastClosed.dueDate;
+      step = 1;
       estimated = true;
       source = 'history';
     }
   }
 
-  // Ciclo informado já fechou (dados antigos) → projeta o próximo.
-  let guard = 0;
-  while (closing < today && guard++ < 24) {
-    closing = addMonths(closing, 1);
-    if (due) due = addMonths(due, 1);
+  // Ciclo informado já fechou (dados antigos) → projeta o próximo. Sempre a partir das datas de referência
+  // com o dia-âncora: somar mês a mês encolheria 31 → 30 → 28 a cada mês curto.
+  const closingDay = manualClosing ?? Number(closing.slice(8, 10));
+  const dueDay = due ? Number(due.slice(8, 10)) : null;
+  const refClosing = closing;
+  const refDue = due;
+  closing = addMonthsAnchored(refClosing, step, closingDay);
+  if (refDue && dueDay) due = addMonthsAnchored(refDue, step, dueDay);
+  while (closing < today && step < 24) {
+    step++;
+    closing = addMonthsAnchored(refClosing, step, closingDay);
+    if (refDue && dueDay) due = addMonthsAnchored(refDue, step, dueDay);
     estimated = true;
   }
   if (source === 'user' && manualDue && manualClosing) {
@@ -715,8 +728,9 @@ export function getCardCycle(card: NormalizedCard, bills: NormalizedBill[], toda
   }
   const previousClosed = [...cardBills].reverse().find((b) => b.closingDate && b.closingDate < closing!);
   const gap = previousClosed?.closingDate ? diffDays(previousClosed.closingDate, closing) : 0;
-  const start = previousClosed?.closingDate && gap <= 40 && gap >= 20 ? addDays(previousClosed.closingDate, 1) : addDays(addMonths(closing, -1), 1);
-  return { cardId: card.id, start, closing, due, estimated, source };
+  const start =
+    previousClosed?.closingDate && gap <= 40 && gap >= 20 ? addDays(previousClosed.closingDate, 1) : addDays(addMonthsAnchored(closing, -1, closingDay), 1);
+  return { cardId: card.id, start, closing, due, estimated, source, closingDay };
 }
 
 /** Parcela ainda não lançada de uma compra parcelada anterior (ex.: 4/10 quando só 3/10 apareceu). */
@@ -776,11 +790,13 @@ function monthFromIndex(i: number): string {
 /** Deslocamento em ciclos (0 = aberto, 1 = próximo, −1 = anterior…) de uma data em relação ao ciclo aberto. */
 function cycleOffsetByDate(date: DateKey, cycle: CardCycle): number {
   if (date >= cycle.start && date <= cycle.closing) return 0;
+  const day = cycle.closingDay ?? Number(cycle.closing.slice(8, 10));
+  const closingAt = (k: number) => addMonthsAnchored(cycle.closing, k, day);
   if (date > cycle.closing) {
-    for (let k = 1; k <= 36; k++) if (date <= addMonths(cycle.closing, k)) return k;
+    for (let k = 1; k <= 36; k++) if (date <= closingAt(k)) return k;
     return 37;
   }
-  for (let k = -1; k >= -48; k--) if (date > addMonths(cycle.closing, k - 1)) return k;
+  for (let k = -1; k >= -48; k--) if (date > closingAt(k - 1)) return k;
   return -49;
 }
 
@@ -836,19 +852,32 @@ function assignBillMonths(txs: NormalizedTransaction[], cycle: CardCycle, billBy
 
 /** Parcelas que ainda não apareceram, projetadas a partir da última parcela conhecida de cada compra. */
 function projectInstallments(txs: NormalizedTransaction[], months: Map<string, string>, fromMonth: string): ProjectedInstallment[] {
-  const series = new Map<string, { last: NormalizedTransaction; month: string }>();
+  // Parcelas da mesma compra: mesmo cartão, descrição, total de parcelas e data da compra. Sem a data da compra,
+  // o valor da parcela separa compras diferentes — com tolerância, porque parcelas variam alguns centavos (10,50 / 10,49).
+  const series: Array<{ key: string; group: string; amount: number; numbers: Set<number>; last: NormalizedTransaction; month: string }> = [];
   for (const t of txs) {
     const inst = t.installment;
     if (!inst || inst.total < 2 || inst.number < 1 || inst.number > inst.total || t.amount >= 0) continue;
     const month = months.get(t.id);
     if (!month) continue;
-    const key = [t.cardId, installmentBase(t.description), inst.total, t.purchaseDate ?? Math.round(-t.amount)].join('|');
-    const cur = series.get(key);
-    if (!cur || inst.number > cur.last.installment!.number) series.set(key, { last: t, month });
+    const amount = -t.amount;
+    const group = [t.cardId, installmentBase(t.description), inst.total, t.purchaseDate ?? ''].join('|');
+    // A mesma parcela (ex.: duas "1/3") não se repete numa compra: com o número já visto, é outra compra.
+    const cur = series.find(
+      (s) => s.group === group && !s.numbers.has(inst.number) && (t.purchaseDate || Math.abs(s.amount - amount) <= Math.max(0.05, s.amount * 0.01)),
+    );
+    if (!cur) series.push({ key: t.purchaseDate ? group : `${group}${Math.round(amount * 100)}`, group, amount, numbers: new Set([inst.number]), last: t, month });
+    else {
+      cur.numbers.add(inst.number);
+      if (inst.number > cur.last.installment!.number) {
+        cur.last = t;
+        cur.month = month;
+      }
+    }
   }
   const from = monthIndex(fromMonth);
   const out: ProjectedInstallment[] = [];
-  for (const [key, { last, month }] of series) {
+  for (const { key, last, month } of series) {
     const inst = last.installment!;
     const base = monthIndex(month);
     for (let n = inst.number + 1; n <= inst.total; n++) {
@@ -867,7 +896,8 @@ export function calculateCurrentBills(cards: NormalizedCard[], transactions: Nor
     if (!cycle) continue;
     const cardBills = bills.filter((b) => b.cardId === card.id);
     const billById = new Map(cardBills.map((b) => [b.id, b]));
-    const txs = transactions.filter((t) => t.cardId === card.id && t.kind === 'expense' && !t.ignored);
+    // Outras moedas não são somadas ao valor da fatura (sem conversão confiável).
+    const txs = transactions.filter((t) => t.cardId === card.id && t.kind === 'expense' && !t.ignored && t.currency === card.currency);
     const months = assignBillMonths(txs, cycle, billById);
     const openMonth = monthKey(cycle.due);
     const openIdx = monthIndex(openMonth);
@@ -1134,13 +1164,6 @@ export function buildProjectionEvents(input: {
   const end = addDays(today, days);
   const events: ProjectionEvent[] = [];
 
-  for (const t of input.transactions) {
-    if (t.source !== 'bank' || t.currency !== base || t.ignored) continue;
-    if (t.date <= today || t.date > end) continue;
-    if (t.kind === 'internal_transfer') continue;
-    events.push({ date: t.date, amount: t.amount, label: t.description, kind: t.amount >= 0 ? 'income' : 'expense', certainty: 'confirmed', origin: 'scheduled' });
-  }
-
   for (const s of input.billSummaries) {
     if (s.card.currency !== base) continue;
     if (s.cycle.due > today && s.cycle.due <= end && s.total > 0) {
@@ -1160,6 +1183,18 @@ export function buildProjectionEvents(input: {
     if (om && monthKey(b.dueDate) >= om) continue;
     const remaining = r2(b.totalAmount - b.paidAmount);
     if (remaining > 0) events.push({ date: b.dueDate, amount: -remaining, label: 'Fatura fechada a pagar', kind: 'bill', certainty: 'confirmed', origin: 'bill' });
+  }
+
+  // Pagamento de fatura já agendado no banco: a fatura correspondente (±5 dias, mesmo valor) já está acima.
+  const billEvents = events.filter((e) => e.kind === 'bill');
+  const isScheduledBillPayment = (t: NormalizedTransaction) =>
+    billEvents.some((e) => Math.abs(diffDays(e.date, t.date)) <= 5 && Math.abs(Math.abs(e.amount) - Math.abs(t.amount)) <= Math.max(1, Math.abs(e.amount) * 0.05));
+  for (const t of input.transactions) {
+    if (t.source !== 'bank' || t.currency !== base || t.ignored) continue;
+    if (t.date <= today || t.date > end) continue;
+    if (t.kind === 'internal_transfer') continue;
+    if (t.kind === 'card_payment' && isScheduledBillPayment(t)) continue;
+    events.push({ date: t.date, amount: t.amount, label: t.description, kind: t.amount >= 0 ? 'income' : 'expense', certainty: 'confirmed', origin: 'scheduled' });
   }
 
   if (input.includeEstimates) {
@@ -1387,7 +1422,8 @@ export function calculateMonthOutlook(input: {
     }
   }
   for (const p of input.planned) {
-    const hits = plannedDates(p, today, end);
+    // Previsto para hoje ainda não aconteceu (previstos nunca entram no realizado): conta como esperado.
+    const hits = plannedDates(p, addDays(today, -1), end);
     if (p.amount >= 0) expIn += p.amount * hits.length;
     else expOut += -p.amount * hits.length;
   }

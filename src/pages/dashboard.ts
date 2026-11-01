@@ -12,13 +12,13 @@ import type { PageContext } from '../router';
 import type { Analytics } from '../services/analytics';
 import { calculateCashFlow, calculateProjectedBalance, buildProjectionEvents, lastMonths } from '../services/financialCalculator';
 import { store } from '../state/store';
-import { clearLayout, loadLayout, saveLayout, type DashboardLayout, type WidgetLayout } from '../storage/preferences';
+import { DASHBOARD_LAYOUT_VERSION, clearLayout, loadLayout, saveLayout, type DashboardLayout, type WidgetLayout } from '../storage/preferences';
 import { addDays, monthEnd } from '../utils/dates';
 import { formatDate, formatMoney, formatMonthKeyShort, formatPercent, formatShortDate } from '../utils/format';
 import { openBillsPanel } from './billsOverview';
 import { CLASS_COLOR, analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, instLabel, noDataState, onDataChange, openAddInstitution, tableToggle } from './shared';
 
-const LAYOUT_VERSION = 3;
+const LAYOUT_VERSION = DASHBOARD_LAYOUT_VERSION;
 const GRID_MIN_WIDTH = 1100;
 
 interface WidgetDef {
@@ -261,7 +261,7 @@ const WIDGETS: WidgetDef[] = [
         <div class="kv-list">
           ${kv(html`Previstas até ${formatShortDate(monthEnd(a.today))} ${o.expectedIncome > 0 ? badge('estimativa', 'outline') : ''}`, money(o.expectedIncome))}
           ${kv('Total esperado no mês', money(o.realizedIncome + o.expectedIncome))}
-          ${kv('Mesmo período do mês anterior', money(a.previousMonthToDate.income))}
+          ${kv('Mesmo período do mês anterior', money(a.previousMonthToDateWithPending.income))}
         </div>`;
     },
   },
@@ -273,7 +273,8 @@ const WIDGETS: WidgetDef[] = [
     visibleByDefault: true,
     render: (a) => {
       const o = a.outlook;
-      const prev = a.previousMonthToDate.expenses;
+      // Mesma base do valor exibido (realizado com pendentes).
+      const prev = a.previousMonthToDateWithPending.expenses;
       const change = prev > 0 ? (o.realizedExpenses - prev) / prev : null;
       return html`${cardHead('Despesas do mês', 'arrowUp')}
         <div class="figure">${figureValue(o.realizedExpenses, 'display')}<div class="figure__meta">${change !== null ? html`${delta(change, { upIsGood: false })}<span>vs. mesmo período do mês anterior</span>` : html`<span>realizadas até ${formatShortDate(a.today)}</span>`}</div></div>

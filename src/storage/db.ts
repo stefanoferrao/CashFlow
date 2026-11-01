@@ -75,7 +75,12 @@ function openOnce(): Promise<IDBDatabase> {
     };
     req.onsuccess = () => {
       const db = req.result;
-      db.onversionchange = () => db.close();
+      db.onversionchange = (e) => {
+        db.close();
+        // Outra aba apagou o banco ("Apagar todos os dados locais"): esquece a conexão, para a próxima chamada abrir de novo.
+        // Atualização de versão por uma aba mais nova: reabrir com a versão antiga falharia; esta aba precisa recarregar.
+        if (e.newVersion === null) dbPromise = null;
+      };
       resolve(db);
     };
     req.onerror = () => reject(req.error ?? new Error('Falha ao abrir IndexedDB'));

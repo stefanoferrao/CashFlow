@@ -12,6 +12,7 @@ import {
   type ConnectorInfo,
   type InstitutionIdentity,
   type NetWorthSnapshot,
+  type NormalizedTransaction,
   type PlannedEntry,
   type ProductLogo,
   type UserCategorization,
@@ -32,7 +33,7 @@ import * as vault from '../security/vault';
 import { isWebCryptoAvailable } from '../security/crypto';
 import { type IdleLock, createIdleLock, inactivityNotice } from '../security/idleLock';
 import { createLockSync, peerLockNotice } from '../security/lockChannel';
-import { CategoryResolver } from '../services/categories';
+import { CategoryResolver, merchantOf } from '../services/categories';
 import { buildDemoDataset } from '../services/demoData';
 import { createSnapshot, calculateNetWorth, upsertSnapshot } from '../services/financialCalculator';
 import { applyIdentities, sanitizeIdentity, sanitizeProductLogo, toHexColor, validDay } from '../services/institutions';
@@ -74,9 +75,29 @@ function getClient(): PluggyClient {
   return client;
 }
 
+/** Troca de credenciais/modo de acesso: o próximo uso cria um cliente novo; quem já tem o antigo segue funcionando. */
 function resetClient(): void {
   client?.clearSession();
   client = null;
+}
+
+/** Bloqueio/"apagar dados": o cliente antigo não faz mais nenhuma chamada (nem autentica de novo). */
+function disposeClient(): void {
+  client?.dispose();
+  client = null;
+}
+
+/**
+ * Época da sessão desbloqueada. Muda ao bloquear e ao apagar os dados locais: uma sincronização
+ * iniciada antes não pode gravar nem publicar nada depois disso.
+ */
+let sessionEpoch = 0;
+
+function endSessionWork(): void {
+  sessionEpoch++;
+  // A sincronização da sessão encerrada não pode "cobrir" pedidos da próxima: os pedidos novos começam do zero.
+  syncInFlight = null;
+  syncQueued = null;
 }
 
 /**
@@ -267,7 +288,8 @@ export async function configureCredentials(setup: CredentialSetup, opts: { enter
   if (formatError) throw new Error(formatError);
 
   if (setup.passphrase === null) {
-    await vault.startEphemeralSession();
+    // Já em modo sessão: mantém a chave, para que as credenciais anteriores possam voltar se a Pluggy recusar as novas.
+    if (!(vault.isUnlocked() && vault.getVaultMode() === 'session')) await vault.startEphemeralSession();
   } else if (!vault.isUnlocked() || vault.getVaultMode() !== 'passphrase') {
     if (await vault.vaultExists()) await vault.unlock(setup.passphrase);
     else await vault.createVault(setup.passphrase);
@@ -391,8 +413,9 @@ export async function unlockVault(passphrase: string): Promise<void> {
  */
 export function lockApp(reason: 'manual' | 'inactivity' | 'peer' = 'manual'): void {
   const wasSession = vault.getVaultMode() === 'session';
+  endSessionWork();
   vault.lock();
-  resetClient();
+  disposeClient();
   secureRepo.clearMemory();
   store.reset({ mode: wasSession ? 'onboarding' : 'locked', connection: { ...store.state.connection, clientIdHint: null, status: 'unknown', lastError: null, vaultMode: null } });
   if (reason === 'manual') lockSync.broadcastLock();
@@ -448,8 +471,11 @@ export async function removeCredentials(): Promise<void> {
 
 /** "Apagar todos os dados locais": banco inteiro, preferências de tema e sessão. */
 export async function wipeAllLocalData(): Promise<void> {
+  endSessionWork();
+  // As outras abas também bloqueiam: o banco vai ser apagado e elas não devem seguir com a chave e os dados na tela.
+  lockSync.broadcastLock();
   vault.lock();
-  resetClient();
+  disposeClient();
   secureRepo.clearMemory();
   await deleteDatabase();
   try {
@@ -560,7 +586,15 @@ async function getResolver(): Promise<CategoryResolver> {
 
 // ------------------------------------------------------------------ sincronização
 
-let syncInFlight: Promise<void> | null = null;
+interface SyncRun {
+  promise: Promise<void>;
+  /** Items que esta execução vai baixar (fixados no início). */
+  ids: readonly string[];
+}
+
+let syncInFlight: SyncRun | null = null;
+/** Pedido que chegou durante uma sincronização e não é coberto por ela: roda logo depois. */
+let syncQueued: { promise: Promise<void>; full: boolean; onlyItemId: string | undefined } | null = null;
 
 function setSync(patch: Partial<typeof store.state.sync>): void {
   const next = { ...store.state.sync, ...patch };
@@ -569,10 +603,24 @@ function setSync(patch: Partial<typeof store.state.sync>): void {
   store.set({ sync: next });
 }
 
+/** Indica se há uma sincronização (de qualquer escopo) em andamento ou na fila. */
+function isSyncBusy(): boolean {
+  return !!syncInFlight || !!syncQueued;
+}
+
+/** Fluxos de um só Item (conectar, adotar, atualizar) não devem encerrar o estado de uma sincronização em andamento. */
+function setSyncUnlessBusy(patch: Partial<typeof store.state.sync>): void {
+  if (!isSyncBusy()) setSync(patch);
+}
+
 /**
  * "Atualizar agora": baixa novamente os dados de todos os Items da Pluggy.
  * Com todos os Items (também ao entrar no app) cobre a tela com a tela de carregamento; a sincronização de um só
  * Item (ao adicionar/reconectar uma instituição) já tem o próprio acompanhamento e segue discreta.
+ *
+ * Pedido feito durante uma sincronização: se ela já cobre os Items pedidos, reaproveita a mesma; senão
+ * roda em seguida (pedidos na fila se juntam), para nenhuma instituição nova ou "Atualizar agora" se perder.
+ * A promessa nunca rejeita: falhas viram o estado de erro da sincronização.
  */
 export function syncAll(opts: { onlyItemId?: string } = {}): Promise<void> {
   const blocking = !opts.onlyItemId;
@@ -586,14 +634,55 @@ export function syncAll(opts: { onlyItemId?: string } = {}): Promise<void> {
       }, 700),
     );
   }
-  if (syncInFlight) return syncInFlight;
-  syncInFlight = runSync(opts.onlyItemId, blocking).finally(() => {
-    syncInFlight = null;
-  });
-  return syncInFlight;
+  const wanted = opts.onlyItemId ? [opts.onlyItemId] : store.state.itemIds;
+  if (syncInFlight) {
+    const running = syncInFlight;
+    if (wanted.every((id) => running.ids.includes(id))) return running.promise;
+    return queueSync(running, opts.onlyItemId);
+  }
+  return startSync(opts.onlyItemId, blocking);
 }
 
-async function runSync(onlyItemId: string | undefined, blocking: boolean): Promise<void> {
+function startSync(onlyItemId: string | undefined, blocking: boolean): Promise<void> {
+  const ids = onlyItemId ? [onlyItemId] : [...store.state.itemIds];
+  const run: SyncRun = {
+    ids,
+    promise: runSync(ids, blocking)
+      .catch((e) => debugLog('sync', 'falha inesperada', e))
+      .finally(() => {
+        if (syncInFlight === run) syncInFlight = null;
+      }),
+  };
+  syncInFlight = run;
+  return run.promise;
+}
+
+function queueSync(running: SyncRun, onlyItemId: string | undefined): Promise<void> {
+  if (syncQueued) {
+    // Pedidos diferentes na fila viram uma sincronização completa.
+    if (!onlyItemId || syncQueued.onlyItemId !== onlyItemId) {
+      syncQueued.full = true;
+      syncQueued.onlyItemId = undefined;
+    }
+    return syncQueued.promise;
+  }
+  const queued: { promise: Promise<void>; full: boolean; onlyItemId: string | undefined } = {
+    full: !onlyItemId,
+    onlyItemId,
+    promise: Promise.resolve(),
+  };
+  queued.promise = running.promise.then((): Promise<void> | void => {
+    // Fila descartada (bloqueio): nada a fazer.
+    if (syncQueued !== queued) return;
+    syncQueued = null;
+    // Pelo syncAll: se outra sincronização começou nesse meio-tempo e já cobre o pedido, reaproveita.
+    return syncAll(queued.full ? {} : { onlyItemId: queued.onlyItemId });
+  });
+  syncQueued = queued;
+  return queued.promise;
+}
+
+async function runSync(ids: readonly string[], blocking: boolean): Promise<void> {
   const st = store.state;
   if (st.mode !== 'real' || !vault.isUnlocked()) return;
   if (!st.connection.hasCredentials) {
@@ -604,15 +693,20 @@ async function runSync(onlyItemId: string | undefined, blocking: boolean): Promi
     setSync({ status: 'error', errorKind: 'offline', errorTitle: FRIENDLY_MESSAGES.offline.title, errorMessage: FRIENDLY_MESSAGES.offline.message });
     return;
   }
-  const ids = onlyItemId ? [onlyItemId] : st.itemIds;
   if (!ids.length) return;
+
+  // Bloqueio ou "apagar dados" no meio do caminho: para tudo, sem gravar nem publicar nada.
+  const epoch = sessionEpoch;
+  const alive = () => epoch === sessionEpoch && vault.isUnlocked() && store.state.mode === 'real';
 
   setSync({ status: 'syncing', progress: 'Autenticando na Pluggy', blocking, errorKind: null, errorTitle: null, errorMessage: null });
   const c = getClient();
   try {
     await c.authenticate();
+    if (!alive()) return;
     store.set({ connection: { ...store.state.connection, status: 'ok', lastError: null } });
   } catch (e) {
+    if (!alive()) return;
     const err = toPluggyError(e);
     store.set({ connection: { ...store.state.connection, status: 'error', lastError: err.message } });
     setSync({ status: 'error', progress: null, errorKind: err.kind, errorTitle: err.title, errorMessage: err.message });
@@ -620,51 +714,74 @@ async function runSync(onlyItemId: string | undefined, blocking: boolean): Promi
     return;
   }
 
-  const resolver = await getResolver();
-  const existing = await secureRepo.getAll<ItemRecord>('pluggy_items');
-  const addedAtById = new Map(existing.map((r) => [r.id, r.value.addedAt]));
-  const failures: Array<{ id: string; err: PluggyError }> = [];
-  const warnings: string[] = [];
+  try {
+    const resolver = await getResolver();
+    const existing = await secureRepo.getAll<ItemRecord>('pluggy_items');
+    if (!alive()) return;
+    const addedAtById = new Map(existing.map((r) => [r.id, r.value.addedAt]));
+    const failures: Array<{ id: string; err: PluggyError }> = [];
+    const warnings: string[] = [];
+    let synced = 0;
 
-  for (const id of ids) {
-    try {
-      const bundle = await fetchItemBundle(c, id, (msg) => setSync({ progress: msg }));
-      const normalized = normalizeBundle(bundle, resolver);
-      warnings.push(...normalized.warnings);
-      await persistItemData(normalized, addedAtById.get(id) ?? new Date().toISOString());
-    } catch (e) {
-      const err = toPluggyError(e);
-      failures.push({ id, err });
-      debugLog('sync', 'falha no item', id, err.kind, err.debugDetail);
-      // Mantém os dados antigos do item e registra o erro no próprio item.
-      const prev = existing.find((r) => r.id === id);
-      if (prev?.value.data) {
-        const data = { ...prev.value.data, item: { ...prev.value.data.item, syncState: 'error' as const, message: err.message } };
-        await secureRepo.put('pluggy_items', id, { ...prev.value, data });
+    for (const id of ids) {
+      try {
+        const bundle = await fetchItemBundle(c, id, (msg) => {
+          if (alive()) setSync({ progress: msg });
+        });
+        if (!alive()) return;
+        const normalized = normalizeBundle(bundle, resolver);
+        // Removida deste navegador enquanto baixava: não grava de volta.
+        if (!(await secureRepo.get<ItemRecord>('pluggy_items', id))) continue;
+        if (!alive()) return;
+        warnings.push(...normalized.warnings);
+        await persistItemData(normalized, addedAtById.get(id) ?? new Date().toISOString());
+        synced++;
+      } catch (e) {
+        if (!alive()) return;
+        const err = toPluggyError(e);
+        failures.push({ id, err });
+        debugLog('sync', 'falha no item', id, err.kind, err.debugDetail);
+        // Mantém os dados antigos do item e registra o erro no próprio item (se ele ainda existe).
+        const prev = existing.find((r) => r.id === id);
+        if (prev?.value.data && (await secureRepo.get<ItemRecord>('pluggy_items', id))) {
+          if (!alive()) return;
+          const data = { ...prev.value.data, item: { ...prev.value.data.item, syncState: 'error' as const, message: err.message } };
+          await secureRepo.put('pluggy_items', id, { ...prev.value, data });
+        }
       }
     }
-  }
 
-  await loadCache();
+    if (!alive()) return;
+    await loadCache();
+    if (!alive()) return;
 
-  // Registro diário do patrimônio (base do histórico/evolução).
-  if (failures.length < ids.length) {
-    const ds = store.state.dataset;
-    const nw = calculateNetWorth(ds.accounts, ds.investments, ds.cards);
-    const snaps = upsertSnapshot(ds.snapshots, createSnapshot(todayKey(), nw));
-    await secureRepo.put('snapshots', 'netWorth', snaps);
-    setData({ baseDataset: { ...store.state.baseDataset, snapshots: snaps } });
-    void ensureConnectors();
-  }
+    // Registro diário do patrimônio (base do histórico/evolução).
+    if (synced > 0) {
+      const ds = store.state.dataset;
+      const nw = calculateNetWorth(ds.accounts, ds.investments, ds.cards);
+      const snaps = upsertSnapshot(ds.snapshots, createSnapshot(todayKey(), nw));
+      await secureRepo.put('snapshots', 'netWorth', snaps);
+      if (!alive()) return;
+      setData({ baseDataset: { ...store.state.baseDataset, snapshots: snaps } });
+      void ensureConnectors();
+    }
 
-  if (failures.length === ids.length) {
-    const err = failures[0]!.err;
+    if (failures.length && !synced) {
+      const err = failures[0]!.err;
+      setSync({ status: 'error', progress: null, errorKind: err.kind, errorTitle: err.title, errorMessage: err.message });
+      notify('error', err.title, err.message);
+    } else {
+      setSync({ status: 'idle', progress: null, lastSyncAt: new Date().toISOString() });
+      if (failures.length) notify('warn', 'Sincronização parcial', `${failures.length} conexão(ões) não puderam ser atualizadas. Veja Contas → Instituições.`);
+      else if (synced) notify('success', 'Dados atualizados', warnings.length ? `${warnings.length} aviso(s) de dados indisponíveis.` : undefined);
+    }
+  } catch (e) {
+    // Falha fora de um Item (armazenamento do navegador, cache corrompido): não deixa a tela de carregamento presa.
+    if (!alive()) return;
+    const err = toPluggyError(e);
+    debugLog('sync', 'falha inesperada na sincronização', err.kind, err.debugDetail);
     setSync({ status: 'error', progress: null, errorKind: err.kind, errorTitle: err.title, errorMessage: err.message });
     notify('error', err.title, err.message);
-  } else {
-    setSync({ status: 'idle', progress: null, lastSyncAt: new Date().toISOString() });
-    if (failures.length) notify('warn', 'Sincronização parcial', `${failures.length} conexão(ões) não puderam ser atualizadas. Veja Contas → Instituições.`);
-    else notify('success', 'Dados atualizados', warnings.length ? `${warnings.length} aviso(s) de dados indisponíveis.` : undefined);
   }
 }
 
@@ -772,11 +889,11 @@ async function adoptExistingItems(ids: string[]): Promise<boolean> {
     return true;
   }
   const c = getClient();
-  setSync({ status: 'syncing', progress: 'Recuperando a conexão que já existe na Pluggy' });
+  setSyncUnlessBusy({ status: 'syncing', progress: 'Recuperando a conexão que já existe na Pluggy' });
   const found = (await Promise.allSettled(ids.slice(0, 10).map((id) => c.getItem(id))))
     .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof c.getItem>>> => r.status === 'fulfilled')
     .map((r) => r.value);
-  setSync({ status: 'idle', progress: null });
+  setSyncUnlessBusy({ status: 'idle', progress: null });
   if (!found.length) {
     notify('error', 'Conexão repetida', 'A Pluggy informou que essa conta já está conectada, mas a conexão existente não pôde ser lida. Use "Tenho um Item ID" com o ID mostrado no Dashboard da Pluggy.');
     return false;
@@ -806,7 +923,7 @@ export async function connectInstitution(updateItemId?: string): Promise<boolean
     return false;
   }
   const c = getClient();
-  setSync({ status: 'syncing', progress: 'Preparando o Pluggy Connect' });
+  setSyncUnlessBusy({ status: 'syncing', progress: 'Preparando o Pluggy Connect' });
   const clientUserId = await pluggyUserId();
   const oauthRedirectUri = oauthRedirectUriFor(location);
   const tokenOpts = { ...(updateItemId ? { itemId: updateItemId } : {}), ...(clientUserId ? { clientUserId } : {}) };
@@ -825,13 +942,13 @@ export async function connectInstitution(updateItemId?: string): Promise<boolean
       }
     }
     if (!recovered) {
-      setSync({ status: 'idle', progress: null });
+      setSyncUnlessBusy({ status: 'idle', progress: null });
       notify('error', err.title, err.message);
       return false;
     }
     token = recovered;
   }
-  setSync({ status: 'idle', progress: null });
+  setSyncUnlessBusy({ status: 'idle', progress: null });
   let result;
   try {
     result = await openPluggyConnect({
@@ -864,7 +981,7 @@ export async function connectInstitution(updateItemId?: string): Promise<boolean
   }
   const itemId = result.item.id;
   await registerItem(itemId);
-  setSync({ status: 'syncing', progress: `${result.item.connector?.name ?? 'Instituição'}: aguardando a coleta da Pluggy` });
+  setSyncUnlessBusy({ status: 'syncing', progress: `${result.item.connector?.name ?? 'Instituição'}: aguardando a coleta da Pluggy` });
   try {
     const ready = await waitForItemReady(c, itemId, (it) => setSync({ progress: `${it.connector?.name ?? 'Instituição'}: ${it.executionStatus}` }));
     const n = normalizeItem(ready);
@@ -873,7 +990,7 @@ export async function connectInstitution(updateItemId?: string): Promise<boolean
     const err = toPluggyError(e);
     notify('warn', err.title, err.message);
   }
-  setSync({ status: 'idle', progress: null });
+  setSyncUnlessBusy({ status: 'idle', progress: null });
   await syncAll({ onlyItemId: itemId });
   notify('success', updateItemId ? 'Instituição reconectada' : 'Instituição conectada', result.item.connector?.name);
   if (!updateItemId) void offerDuplicateCleanup(itemId);
@@ -920,13 +1037,13 @@ export async function requestInstitutionRefresh(itemId: string): Promise<void> {
   try {
     await getClient().updateItem(itemId);
     notify('info', 'Atualização solicitada', 'A Pluggy vai coletar os dados novamente na instituição. Isso pode levar alguns minutos.');
-    setSync({ status: 'syncing', progress: 'Aguardando a Pluggy concluir a coleta' });
+    setSyncUnlessBusy({ status: 'syncing', progress: 'Aguardando a Pluggy concluir a coleta' });
     await waitForItemReady(getClient(), itemId);
-    setSync({ status: 'idle', progress: null });
+    setSyncUnlessBusy({ status: 'idle', progress: null });
     await syncAll({ onlyItemId: itemId });
   } catch (e) {
     const err = toPluggyError(e);
-    setSync({ status: 'idle', progress: null });
+    setSyncUnlessBusy({ status: 'idle', progress: null });
     notify(err.kind === 'item_cannot_update' ? 'info' : 'error', err.title, err.message);
   }
 }
@@ -1093,6 +1210,30 @@ export async function setTransactionOverride(txId: string, override: CategoryOve
   if (override) overrides[txId] = { ...overrides[txId], ...override };
   else delete overrides[txId];
   await saveCategorization({ ...uc, overrides });
+}
+
+/**
+ * Recategoriza uma transação. `scope`:
+ *  - 'one': só esta (ajuste individual);
+ *  - 'all': todas do mesmo estabelecimento, inclusive as futuras (regra). A regra do mesmo estabelecimento é
+ *    substituída e a nova vence as anteriores; ajustes individuais de OUTRAS transações continuam valendo.
+ */
+export async function categorizeTransaction(
+  tx: Pick<NormalizedTransaction, 'id' | 'merchant' | 'description'>,
+  change: { category: AppCategoryId; subcategory: string | null; ignored: boolean },
+  scope: 'one' | 'all',
+): Promise<void> {
+  const ref = scope === 'all' ? merchantOf(tx) : null;
+  if (!ref) return setTransactionOverride(tx.id, change);
+  const uc = store.state.categorization;
+  const rules = uc.rules.filter((r) => !(r.match === ref.match && r.contains === ref.key));
+  rules.push({ id: uid('rule'), contains: ref.key, match: ref.match, label: ref.label, category: change.category, subcategory: change.subcategory });
+  // Esta transação passa a seguir a regra (sem categoria própria); "ignorar nos cálculos" continua sendo dela.
+  // (Os dados importados nunca chegam ignorados: só o "sim" precisa ficar guardado.)
+  const overrides = { ...uc.overrides };
+  if (change.ignored) overrides[tx.id] = { ignored: true };
+  else delete overrides[tx.id];
+  await saveCategorization({ ...uc, rules, overrides });
 }
 
 export async function addCategoryRule(rule: Omit<CategoryRule, 'id'>): Promise<void> {

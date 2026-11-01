@@ -35,7 +35,7 @@ function source(over: Partial<UserConfigSource> = {}): UserConfigSource {
   return {
     theme: 'dark',
     preferences: { hideValues: true, includeEstimates: false, cacheTtlHours: 6 },
-    layout: { version: 1, widgets: [{ id: 'patrimonio', x: 0, y: 0, w: 6, h: 4, visible: true, pinned: false }], mobileOrder: ['patrimonio', 'fluxo'] },
+    layout: { version: 3, widgets: [{ id: 'patrimonio', x: 0, y: 0, w: 6, h: 4, visible: true, pinned: false }], mobileOrder: ['patrimonio', 'fluxo'] },
     labels,
     categorization,
     planned,
@@ -161,7 +161,7 @@ describe('importar valida o que vem no arquivo', () => {
   });
 
   it('cards do dashboard com posição inválida ou identificador estranho são descartados', () => {
-    const f = { ...(buildUserConfig(source()) as object), dashboardLayout: { version: 1, widgets: [{ id: 'ok', x: 0, y: 0, w: 3, h: 2 }, { id: 'ruim', x: -1, y: 0, w: 3, h: 2 }, { id: 'muito', x: 0, y: 0, w: 999, h: 2 }, { id: '<b>', x: 0, y: 0, w: 1, h: 1 }] } };
+    const f = { ...(buildUserConfig(source()) as object), dashboardLayout: { version: 3, widgets: [{ id: 'ok', x: 0, y: 0, w: 3, h: 2 }, { id: 'ruim', x: -1, y: 0, w: 3, h: 2 }, { id: 'muito', x: 0, y: 0, w: 999, h: 2 }, { id: '<b>', x: 0, y: 0, w: 1, h: 1 }] } };
     const layout = parseUserConfig(JSON.stringify(f)).config.layout!;
     expect(layout.widgets).toEqual([{ id: 'ok', x: 0, y: 0, w: 3, h: 2, visible: true, pinned: false }]);
   });
@@ -216,7 +216,35 @@ describe('arquivos que não servem', () => {
     const parsed = parseUserConfig(v1);
     expect(parsed.version).toBe(1);
     expect(parsed.config).toMatchObject({ theme: 'light', labels: null, categorization: null, planned: null });
-    expect(parsed.config.layout?.widgets[0]).toMatchObject({ id: 'fluxo', pinned: true });
+    // A organização do dashboard da versão 1 não serve mais (a grade mudou): fica de fora para não apagar a atual.
+    expect(parsed.config.layout).toBeNull();
+    expect(parsed.dropped).toBeGreaterThan(0);
+  });
+
+  it('organização do dashboard da versão atual é importada', () => {
+    const f = { ...(buildUserConfig(source()) as object), dashboardLayout: { version: 3, widgets: [{ id: 'fluxo', x: 0, y: 0, w: 12, h: 5, visible: true, pinned: true }] } };
+    expect(parseUserConfig(JSON.stringify(f)).config.layout?.widgets[0]).toMatchObject({ id: 'fluxo', pinned: true });
+  });
+
+  it('nomes herdados de objeto ("toString", "__proto__", "constructor") não são aceitos como categoria', () => {
+    const f = {
+      app: 'cashflow',
+      kind: 'visual-config',
+      categorization: {
+        rules: [
+          { id: 'r1', contains: 'a', category: 'toString' },
+          { id: 'r2', contains: 'b', category: 'constructor' },
+          { id: 'r3', contains: 'c', category: 'alimentacao' },
+        ],
+        overrides: { tx1: { category: 'valueOf' } },
+        customSubcategories: { toString: ['X'], hasOwnProperty: ['Y'] },
+      },
+    };
+    const parsed = parseUserConfig(JSON.stringify(f));
+    expect(parsed.config.categorization?.rules.map((r) => r.category)).toEqual(['alimentacao']);
+    expect(parsed.config.categorization?.overrides).toEqual({});
+    expect(Object.keys(parsed.config.categorization?.customSubcategories ?? {})).toEqual([]);
+    expect(() => mergeCategorization(emptyCategorization(), parsed.config.categorization!)).not.toThrow();
   });
 });
 

@@ -37,6 +37,19 @@ async function openSessionTab(): Promise<App> {
   return app;
 }
 
+describe('"Apagar todos os dados locais" bloqueia as outras abas', () => {
+  it('A apaga tudo → B bloqueia e descarta a chave', async () => {
+    const a = await openTab();
+    const b = await openTab();
+    await a.actions.wipeAllLocalData();
+    await settle();
+    expect(a.store.state.mode).toBe('onboarding');
+    expect(b.store.state.mode).toBe('locked');
+    expect(b.vault.isUnlocked()).toBe(false);
+    expect(hub.posted).toEqual([{ type: 'lock' }]);
+  });
+});
+
 describe('bloqueio manual propaga para as outras abas', () => {
   it('A bloqueia → B vai para "locked" (cofre fechado), A continua "locked" e só UM sinal foi postado (B não retransmite)', async () => {
     const a = await openTab();

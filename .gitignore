@@ -13,3 +13,7 @@ dist/
 
 # Logs
 *.log
+
+# Resultados dos testes E2E (Playwright)
+test-results/
+playwright-report/

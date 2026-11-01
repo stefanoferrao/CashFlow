@@ -4,13 +4,12 @@
  */
 import { delegate, html, render, type SafeHtml } from '../components/dom';
 import { icon } from '../components/icons';
-import { confirmDialog, openModal } from '../components/modal';
+import { choiceDialog, confirmDialog, openModal } from '../components/modal';
 import { badge, categoryIcon, categoryLabel, instLogo, money, stateBlock } from '../components/ui';
 import { APP_CONFIG } from '../config/app.config';
 import { APP_CATEGORIES, TRANSACTION_KIND_LABEL, type AppCategoryId, type NormalizedAccount, type NormalizedCard, type NormalizedTransaction } from '../models/finance';
 import type { PageContext } from '../router';
-import { DEFAULT_SUBCATEGORIES } from '../services/categories';
-import { recurrenceKey } from '../services/recurrence';
+import { DEFAULT_SUBCATEGORIES, countRuleReach, merchantOf, ruleMatches } from '../services/categories';
 import { defaultFilters, filterTransactions, paginate, sortTransactions, summarizeTransactions, type SortKey, type TxFilters } from '../services/transactionQuery';
 import * as actions from '../state/actions';
 import { store } from '../state/store';
@@ -326,6 +325,9 @@ export function mount(ctx: PageContext): () => void {
     if (!t) return;
     const uc = store.state.categorization;
     const subs = Array.from(new Set([...(DEFAULT_SUBCATEGORIES[t.category] ?? []), ...(uc.customSubcategories[t.category] ?? [])]));
+    const merchant = merchantOf(t);
+    // Categoria vinda de uma regra (a mais recente que casa), quando não há ajuste só desta transação.
+    const appliedRule = uc.overrides[t.id]?.category ? undefined : [...uc.rules].reverse().find((r) => ruleMatches(r, t));
     const m = openModal({
       title: 'Transação',
       body: html`
@@ -348,9 +350,10 @@ export function mount(ctx: PageContext): () => void {
             <datalist id="subcat-list">${subs.map((x) => html`<option value="${x}"></option>`)}</datalist>
             <span class="field__hint">Digite um nome novo para criar uma subcategoria.</span></label>
           <label class="switch"><input type="checkbox" name="ignored" ${t.ignored ? 'checked' : ''} /><span class="switch__track"></span><span>Ignorar nos cálculos (receitas, despesas e fluxo)</span></label>
-          <label class="check"><input type="checkbox" name="rule" /> Aplicar também a futuras transações com descrição semelhante (“${recurrenceKey(t.description) || t.description}”)</label>
+          ${merchant ? html`<p class="field__hint">Ao trocar a categoria, você escolhe se vale só para esta transação ou para todas de “${merchant.label}”.</p>` : ''}
         </form>`,
-      footer: html`${t.userCategorized || uc.overrides[t.id] ? html`<button type="button" class="btn btn--ghost" data-reset>Desfazer ajustes</button>` : ''}
+      footer: html`${uc.overrides[t.id] ? html`<button type="button" class="btn btn--ghost" data-reset>Desfazer ajustes</button>` : ''}
+        ${appliedRule ? html`<button type="button" class="btn btn--ghost" data-remove-applied-rule>Remover regra</button>` : ''}
         <button type="button" class="btn btn--secondary" data-modal-close>Cancelar</button>
         <button type="button" class="btn btn--primary" data-save>${icon('check')}Salvar</button>`,
     });
@@ -358,17 +361,46 @@ export function mount(ctx: PageContext): () => void {
       await actions.setTransactionOverride(t.id, null);
       m.close();
     });
+    m.el.querySelector('[data-remove-applied-rule]')?.addEventListener('click', async () => {
+      if (!appliedRule) return;
+      const name = appliedRule.match ? `todas de “${appliedRule.label ?? appliedRule.contains}”` : `descrição com “${appliedRule.contains}”`;
+      const ok = await confirmDialog({
+        title: 'Remover regra?',
+        message: `A regra “${categoryLabel(appliedRule.category)}” para ${name} deixa de valer. As transações voltam à categoria original (ajustes individuais são mantidos).`,
+        confirmLabel: 'Remover',
+        danger: true,
+      });
+      if (!ok) return;
+      await actions.removeCategoryRule(appliedRule.id);
+      m.close();
+    });
     m.el.querySelector('[data-save]')!.addEventListener('click', async () => {
       const f = new FormData(m.el.querySelector<HTMLFormElement>('[data-cat-form]')!);
       const category = f.get('category') as AppCategoryId;
       const sub = String(f.get('subcategory') ?? '').trim() || null;
       const ignored = f.get('ignored') === 'on';
-      if (sub) await actions.addCustomSubcategory(category, sub);
-      await actions.setTransactionOverride(t.id, { category, subcategory: sub, ignored });
-      if (f.get('rule') === 'on') {
-        const key = recurrenceKey(t.description) || t.description.slice(0, 30);
-        await actions.addCategoryRule({ contains: key, category, subcategory: sub });
+      const categoryChanged = category !== t.category || sub !== (t.subcategory ?? null);
+      let scope: 'one' | 'all' = 'one';
+      if (categoryChanged && merchant) {
+        const all = analytics().transactions;
+        const reach = countRuleReach(all, { id: 'preview', contains: merchant.key, match: merchant.match, category, subcategory: sub }, store.state.categorization);
+        const others = Math.max(0, reach.total - 1);
+        const target = `${categoryLabel(category)}${sub ? ` · ${sub}` : ''}`;
+        const kept = reach.keptByOverride - (uc.overrides[t.id]?.category ? 1 : 0);
+        const choice = await choiceDialog({
+          title: 'Aplicar a nova categoria',
+          message: `Categorizar como “${target}” só esta transação ou todas de “${merchant.label}”?`,
+          detail: `${others ? `Há mais ${others} transação(ões) desse estabelecimento.` : 'Por enquanto só existe esta transação desse estabelecimento.'} Com “Todas”, as próximas também entram nessa categoria.${kept > 0 ? ` ${kept} delas têm categoria escolhida uma a uma e continuam como estão.` : ''}`,
+          choices: [
+            { value: 'one', label: 'Só esta' },
+            { value: 'all', label: others ? `Todas (${others + 1})` : 'Todas, inclusive as próximas', primary: true },
+          ],
+        });
+        if (!choice) return;
+        scope = choice === 'all' ? 'all' : 'one';
       }
+      if (sub) await actions.addCustomSubcategory(category, sub);
+      await actions.categorizeTransaction(t, { category, subcategory: sub, ignored }, scope);
       m.close();
     });
   }
@@ -378,13 +410,13 @@ export function mount(ctx: PageContext): () => void {
     const m = openModal({
       title: 'Regras de categorização',
       wide: true,
-      body: html`<p class="muted">Regras locais: transações cuja descrição contém o texto recebem a categoria escolhida. Ajustes individuais têm prioridade.</p>
+      body: html`<p class="muted">Regras locais: transações do estabelecimento (ou cuja descrição contém o texto) recebem a categoria escolhida. A regra mais recente vence. Ajustes feitos em uma única transação têm prioridade.</p>
         ${rules.length
           ? html`<div class="list">${rules.map(
-              (r) => html`<div class="list-item">${categoryIcon(r.category)}<span class="list-item__main"><span class="list-item__title">“${r.contains}”</span><span class="list-item__sub">${categoryLabel(r.category)}${r.subcategory ? ` · ${r.subcategory}` : ''}</span></span>
+              (r) => html`<div class="list-item">${categoryIcon(r.category)}<span class="list-item__main"><span class="list-item__title">${r.match ? `Todas de “${r.label ?? r.contains}”` : `“${r.contains}”`}</span><span class="list-item__sub">${categoryLabel(r.category)}${r.subcategory ? ` · ${r.subcategory}` : ''}</span></span>
                 <button type="button" class="icon-btn icon-btn--sm" data-remove-rule="${r.id}" aria-label="Remover regra ${r.contains}">${icon('trash')}</button></div>`,
             )}</div>`
-          : stateBlock({ kind: 'empty', title: 'Nenhuma regra ainda', text: 'Crie regras ao editar uma transação.', compact: true })}
+          : stateBlock({ kind: 'empty', title: 'Nenhuma regra ainda', text: 'Ao trocar a categoria de uma transação, escolha “Todas” para criar uma regra do estabelecimento, ou crie uma aqui.', compact: true })}
         <form class="filters" data-rule-form style="align-items:end">
           <label class="field"><span class="field__label">Descrição contém</span><input class="input input--sm" name="contains" required maxlength="60" /></label>
           <label class="field"><span class="field__label">Categoria</span><select class="select select--sm" name="category">${APP_CATEGORIES.map((c) => html`<option value="${c.id}">${c.label}</option>`)}</select></label>

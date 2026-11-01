@@ -26,7 +26,7 @@ import {
   emptyCategorization,
   emptyLabels,
 } from '../models/finance';
-import type { DashboardLayout, ThemePref, UserPreferences, WidgetLayout } from '../storage/preferences';
+import { DASHBOARD_LAYOUT_VERSION, type DashboardLayout, type ThemePref, type UserPreferences, type WidgetLayout } from '../storage/preferences';
 import { sanitizeIdentity, sanitizeProductLogo, validDay } from './institutions';
 
 /** Identificador do formato. Mantido igual ao da 1ª versão: arquivos antigos continuam sendo aceitos. */
@@ -132,6 +132,12 @@ function findIgnored(root: Record<string, unknown>): string[] {
 
 function readLayout(v: unknown, count: { dropped: number }): DashboardLayout | null {
   if (!isRecord(v) || !Array.isArray(v.widgets)) return null;
+  // Layout de outra versão (arquivo antigo): o dashboard o trocaria pelo padrão e o atual se perderia. Fica de fora.
+  const version = Number.isInteger(v.version) ? (v.version as number) : 1;
+  if (version !== DASHBOARD_LAYOUT_VERSION) {
+    count.dropped++;
+    return null;
+  }
   const widgets: WidgetLayout[] = [];
   for (const w of v.widgets.slice(0, MAX_WIDGETS)) {
     if (!isRecord(w) || typeof w.id !== 'string' || !SAFE_KEY.test(w.id) || ![w.x, w.y, w.w, w.h].every((n) => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= 200)) {
@@ -141,7 +147,7 @@ function readLayout(v: unknown, count: { dropped: number }): DashboardLayout | n
     widgets.push({ id: w.id, x: w.x as number, y: w.y as number, w: w.w as number, h: w.h as number, visible: w.visible !== false, pinned: w.pinned === true });
   }
   const mobileOrder = Array.isArray(v.mobileOrder) ? v.mobileOrder.filter((x): x is string => typeof x === 'string' && SAFE_KEY.test(x)).slice(0, MAX_WIDGETS) : undefined;
-  return { version: Number.isInteger(v.version) ? (v.version as number) : 1, widgets, ...(mobileOrder ? { mobileOrder } : {}) };
+  return { version, widgets, ...(mobileOrder ? { mobileOrder } : {}) };
 }
 
 /** Aplica `read` a cada entrada de um dicionário, com chaves seguras e no máximo `max` entradas. */
@@ -180,7 +186,8 @@ function readLabels(v: unknown, count: { dropped: number }): UserLabels | null {
   return labels;
 }
 
-const validCategory = (c: unknown): c is AppCategoryId => typeof c === 'string' && c in CATEGORY_BY_ID;
+// Object.hasOwn: "toString", "constructor" etc. existem em qualquer objeto e não são categorias.
+const validCategory = (c: unknown): c is AppCategoryId => typeof c === 'string' && Object.hasOwn(CATEGORY_BY_ID, c);
 
 function readCategorization(v: unknown, count: { dropped: number }): UserCategorization | null {
   if (!isRecord(v)) return null;
@@ -201,7 +208,13 @@ function readCategorization(v: unknown, count: { dropped: number }): UserCategor
         count.dropped++;
         continue;
       }
-      uc.rules.push({ id: r.id, contains, category: r.category, subcategory: str(r.subcategory, 40) || null } satisfies CategoryRule);
+      const rule: CategoryRule = { id: r.id, contains, category: r.category, subcategory: str(r.subcategory, 40) || null };
+      if (r.match === 'merchant' || r.match === 'similar') {
+        rule.match = r.match;
+        const label = str(r.label, 60);
+        if (label) rule.label = label;
+      }
+      uc.rules.push(rule);
     }
   }
   if (isRecord(v.customSubcategories)) {

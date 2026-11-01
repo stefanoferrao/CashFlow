@@ -47,9 +47,15 @@ export function isUploadedLogo(url: string | null | undefined): boolean {
   return !!url && /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(url) && url.length <= 200_000;
 }
 
-/** URLs de logo aceitas: https (catálogo da Pluggy), ícone local ou imagem enviada. */
+/** Logo do catálogo da Pluggy (cdn.pluggy.ai e demais domínios pluggy.ai). */
+const PLUGGY_LOGO_URL = /^https:\/\/([a-z0-9-]+\.)*pluggy\.ai\/[^\s"'<>]*$/i;
+
+/**
+ * URLs de logo aceitas: https do catálogo da Pluggy, ícone local ou imagem enviada. Outro domínio https
+ * (num arquivo de personalização importado, por exemplo) faria o app carregar imagem de um servidor de terceiros.
+ */
 export function isAllowedLogoUrl(url: string | null | undefined): url is string {
-  return !!url && (/^https:\/\/[^\s"'<>]+$/.test(url) || isLocalIconUrl(url) || isUploadedLogo(url));
+  return !!url && (PLUGGY_LOGO_URL.test(url) || isLocalIconUrl(url) || isUploadedLogo(url));
 }
 
 /** Cor do ícone útil como cor da instituição (fundos brancos/quase brancos não servem para o cartão). */

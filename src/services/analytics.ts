@@ -58,6 +58,8 @@ export interface Analytics {
   month: PeriodTotals;
   /** Mesmo intervalo de dias do mês anterior (comparação justa). */
   previousMonthToDate: PeriodTotals;
+  /** Mesmo período do mês anterior incluindo pendentes: mesma base de `outlook` (realizado do mês). */
+  previousMonthToDateWithPending: PeriodTotals;
   outlook: ReturnType<typeof calculateMonthOutlook>;
   savingsRate: number | null;
   categoryMonth: CategoryShare[];
@@ -94,6 +96,7 @@ export function computeAnalytics(
   const prevEndCandidate = addDays(prevStart, elapsed);
   const prevEnd = prevEndCandidate > monthEnd(prevStart) ? monthEnd(prevStart) : prevEndCandidate;
   const previousMonthToDate = calculatePeriodTotals(transactions, prevStart, prevEnd, false);
+  const previousMonthToDateWithPending = calculatePeriodTotals(transactions, prevStart, prevEnd, true);
   const recurrences = detectRecurrences(transactions, today);
   const outlook = calculateMonthOutlook({ today, transactions, recurrences, planned, includeEstimates });
   const upcoming = buildProjectionEvents({
@@ -124,6 +127,7 @@ export function computeAnalytics(
     openBills: calculateOpenBillsOverview(ds.cards, bills, billProjections, ds.bills, today),
     month,
     previousMonthToDate,
+    previousMonthToDateWithPending,
     outlook,
     savingsRate: calculateSavingsRate(month.income, month.expenses),
     categoryMonth: calculateCategoryBreakdown(transactions, mStart, today),
