@@ -488,7 +488,7 @@ export function mount(ctx: PageContext): () => void {
           </div>
           <ol class="customize-steps">
             ${grid0
-              ? html`<li><span class="customize-steps__icon">${icon('grip')}</span><span><strong>Mover:</strong> segure a barra verde no topo do card e arraste até o lugar desejado.</span></li>
+              ? html`<li><span class="customize-steps__icon">${icon('grip')}</span><span><strong>Mover:</strong> segure a barra colorida no topo do card e arraste até o lugar desejado.</span></li>
                   <li><span class="customize-steps__icon">${icon('width')}</span><span><strong>Tamanho:</strong> use <em>Largura</em> e <em>Altura</em> (− / +) no rodapé do card, ou arraste o canto ${icon('resize')} inferior direito.</span></li>
                   <li><span class="customize-steps__icon">${icon('eye')}</span><span><strong>Mostrar/ocultar:</strong> marque os cards na lista abaixo ou use ${icon('eyeOff')} no card. ${icon('pin')} fixa posição e tamanho.</span></li>`
               : html`<li><span class="customize-steps__icon">${icon('chevronUp')}</span><span><strong>Ordem:</strong> use as setas ↑ ↓ no topo de cada card (ou na lista abaixo).</span></li>

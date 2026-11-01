@@ -3,7 +3,7 @@
  */
 export const APP_CONFIG = {
   name: 'CashFlow',
-  version: '1.4.0',
+  version: '1.4.1',
 
   /** Notas de Atualização: Releases públicas do repositório (consultadas só ao abrir a tela). */
   releases: {

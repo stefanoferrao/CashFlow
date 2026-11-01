@@ -60,7 +60,7 @@ export function applyTheme(pref: ThemePref): 'light' | 'dark' {
   root.setAttribute('data-theme-pref', pref);
   root.setAttribute('data-theme', resolved);
   const meta = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]');
-  meta.forEach((m) => m.setAttribute('content', resolved === 'dark' ? '#0F1115' : '#F6F7F9'));
+  meta.forEach((m) => m.setAttribute('content', resolved === 'dark' ? '#171721' : '#F4F4F8'));
   return resolved;
 }
 

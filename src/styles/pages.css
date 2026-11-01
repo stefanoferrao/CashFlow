@@ -17,7 +17,7 @@
   gap: 6px 16px;
   font-size: var(--fs-xs);
   color: var(--text-2);
-  font-weight: 550;
+  font-weight: 460;
 }
 .chart-legend__item {
   display: inline-flex;
@@ -177,10 +177,10 @@
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 500;
 }
 .mini-list__value {
-  font-weight: 600;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 .mini-list .badge {
@@ -287,7 +287,7 @@
 }
 .details summary {
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-2);
 }
 .details[open] summary {
@@ -320,8 +320,8 @@ code {
   flex-direction: column;
   justify-content: space-between;
   gap: var(--s-8);
-  background: #0c0f14;
-  color: #f3f4f6;
+  background: var(--night);
+  color: var(--on-night);
   isolation: isolate;
 }
 .screen__aside::before {
@@ -329,12 +329,12 @@ code {
   position: absolute;
   inset: -20%;
   background:
-    radial-gradient(40% 35% at 20% 20%, rgba(34, 197, 94, 0.28), transparent 70%),
-    radial-gradient(35% 30% at 85% 75%, rgba(42, 120, 214, 0.22), transparent 70%);
+    radial-gradient(40% 35% at 20% 20%, rgba(82, 102, 235, 0.32), transparent 70%),
+    radial-gradient(35% 30% at 85% 75%, rgba(82, 102, 235, 0.16), transparent 70%);
   z-index: -1;
 }
 .screen__aside .brand {
-  color: #f3f4f6;
+  color: var(--on-night);
 }
 .screen__aside .brand__mark {
   background: rgba(255, 255, 255, 0.08);
@@ -343,15 +343,15 @@ code {
   font-size: clamp(2rem, 1.2rem + 2.6vw, 3.4rem);
   line-height: 1.05;
   letter-spacing: -0.035em;
-  font-weight: 700;
+  font-weight: 560;
   max-width: 14ch;
 }
 .screen__headline em {
   font-style: normal;
-  color: #4ade80;
+  color: var(--periwinkle);
 }
 .screen__lede {
-  color: #aab0bb;
+  color: var(--on-night-2);
   max-width: 44ch;
   font-size: var(--fs-lg);
 }
@@ -382,7 +382,7 @@ code {
   margin-left: var(--s-3);
 }
 .preview-card span {
-  color: #aab0bb;
+  color: var(--on-night-2);
   font-size: var(--fs-sm);
 }
 .preview-card strong {
@@ -400,7 +400,7 @@ code {
 .preview-card .bar > i {
   display: block;
   height: 100%;
-  background: #22c55e;
+  background: var(--accent);
   border-radius: 6px;
 }
 .screen__main {
@@ -435,7 +435,7 @@ code {
 }
 .step-label {
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 560;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -593,7 +593,7 @@ code {
 .account-row__value {
   text-align: right;
   font-size: var(--fs-lg);
-  font-weight: 650;
+  font-weight: 520;
 }
 
 /* ===================== Cartões ===================== */
@@ -625,11 +625,11 @@ code {
 .detail > span {
   font-size: var(--fs-xs);
   color: var(--text-2);
-  font-weight: 550;
+  font-weight: 460;
 }
 .detail strong {
   font-size: var(--fs-md);
-  font-weight: 650;
+  font-weight: 520;
 }
 
 /* ===================== Faturas ===================== */
@@ -663,7 +663,7 @@ code {
 .breakdown__row:last-child {
   border-bottom: 0;
   background: var(--surface-2);
-  font-weight: 700;
+  font-weight: 560;
 }
 .breakdown__row span {
   color: var(--text-2);
@@ -721,7 +721,7 @@ code {
   min-width: 0;
 }
 .tx-desc__text strong {
-  font-weight: 600;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -769,7 +769,7 @@ code {
 .day-head {
   padding: 10px var(--s-4) 6px;
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 560;
   color: var(--text-2);
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
@@ -794,7 +794,7 @@ code {
   padding: 8px 12px;
   border-radius: var(--r-sm);
   color: var(--text-2);
-  font-weight: 550;
+  font-weight: 460;
   font-size: var(--fs-sm);
 }
 .settings-nav a:hover {
@@ -1107,7 +1107,7 @@ fieldset.field > legend {
   border: 1px solid var(--border-strong);
   border-radius: var(--r-full);
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-2);
   transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
 }
@@ -1290,7 +1290,7 @@ fieldset.field > legend {
 }
 .logo-group__title {
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 520;
   letter-spacing: 0.02em;
   color: var(--text-2);
 }
@@ -1393,7 +1393,7 @@ fieldset.field > legend {
   background: none;
   color: var(--accent-text);
   font: inherit;
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: underline;
   cursor: pointer;
 }
@@ -1517,7 +1517,7 @@ a.ob-row--btn:hover,
   gap: 1px;
 }
 .ob-row__main strong {
-  font-weight: 600;
+  font-weight: 500;
   font-size: var(--fs-sm);
 }
 .ob-row__sub {
@@ -1542,7 +1542,7 @@ a.ob-row--btn:hover,
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  font-weight: 650;
+  font-weight: 520;
   white-space: nowrap;
 }
 .ob-row__pct {
@@ -1577,7 +1577,7 @@ a.ob-row--btn:hover,
 .section-title {
   margin: 0;
   font-size: var(--fs-md, 1rem);
-  font-weight: 650;
+  font-weight: 520;
 }
 .chips-row {
   display: flex;
@@ -1655,7 +1655,7 @@ a.ob-row--btn:hover,
 }
 .customize-item__size {
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-2);
   padding: 2px 8px;
   border-radius: var(--r-full);
@@ -1686,7 +1686,7 @@ a.ob-row--btn:hover,
   justify-content: space-between;
   pointer-events: none;
   border-radius: var(--r-xl);
-  outline: 2px dashed #16a34a;
+  outline: 2px dashed var(--accent);
   outline-offset: -2px;
 }
 .dash-edit--flow {
@@ -1704,9 +1704,9 @@ a.ob-row--btn:hover,
   padding: 8px 8px 8px 10px;
   margin: 6px 6px 0;
   border-radius: calc(var(--r-xl) - 6px);
-  background: #15803d;
+  background: var(--accent);
   color: #fff;
-  box-shadow: 0 6px 16px -8px rgba(22, 101, 52, 0.6);
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--accent) 70%, transparent);
 }
 .grid-stack-item.is-pinned .dash-edit__bar {
   background: var(--surface-inverse);
@@ -1742,7 +1742,7 @@ a.ob-row--btn:hover,
 }
 .dash-edit__title strong {
   font-size: var(--fs-sm);
-  font-weight: 650;
+  font-weight: 520;
 }
 .dash-edit__hint {
   font-size: 11px;
@@ -1824,7 +1824,7 @@ a.ob-row--btn:hover,
 .dash-edit__val {
   min-width: 38px;
   text-align: center;
-  font-weight: 700;
+  font-weight: 560;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
@@ -1932,7 +1932,7 @@ a.ob-row--btn:hover,
   padding: 0 8px;
   border-radius: 10px;
   background: var(--surface);
-  font-weight: 700;
+  font-weight: 560;
   font-size: var(--fs-md);
   flex: none;
 }
@@ -1946,7 +1946,7 @@ a.ob-row--btn:hover,
 .tag-source {
   display: inline-block;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-2);
   background: var(--surface-2);
   border-radius: var(--r-full);
@@ -1977,7 +1977,7 @@ a.ob-row--btn:hover,
 }
 .period-nav__label strong {
   font-size: var(--fs-lg, 1.125rem);
-  font-weight: 650;
+  font-weight: 520;
 }
 .period-nav__label .muted {
   font-size: var(--fs-xs);
@@ -1992,7 +1992,7 @@ a.ob-row--btn:hover,
 /* ===================== Notas de Atualização ===================== */
 .nav__version {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-3);
   margin-left: 4px;
 }
@@ -2024,11 +2024,11 @@ a.ob-row--btn:hover,
 }
 .release__title strong {
   font-size: var(--fs-lg, 1.125rem);
-  font-weight: 650;
+  font-weight: 520;
 }
 .release__tag {
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: 560;
   padding: 3px 8px;
   border-radius: var(--r-full);
   background: var(--surface-inverse);
@@ -2145,4 +2145,20 @@ a.ob-row--btn:hover,
 .md a {
   color: var(--accent-text);
   text-decoration: underline;
+}
+
+/* Valores grandes nos cards do dashboard: a fonte acompanha a largura do card (Inter é mais larga que a
+   antiga DM Sans). Valores na casa das centenas de milhar ocupam ~6,5× o tamanho da fonte; 48px = padding do card. */
+.grid-stack-item-content {
+  container-type: inline-size;
+}
+.grid-stack-item-content .figure__value {
+  font-size: min(var(--fs-display), calc((100cqi - 48px) / 6.6));
+}
+.grid-stack-item-content .figure__value--hero {
+  font-size: min(var(--fs-hero), calc((100cqi - 48px) / 6.6));
+}
+/* Dentro de .split cada valor tem meia largura (menos o espaço entre as colunas). */
+.grid-stack-item-content .split .figure__value {
+  font-size: min(var(--fs-display), calc((50cqi - 32px) / 6.2));
 }
