@@ -41,6 +41,15 @@ export function addMonths(key: DateKey, months: number): DateKey {
   return toDateKey(target);
 }
 
+/**
+ * Soma meses mantendo o dia-âncora: com âncora 31, 2026-02-28 + 1 mês = 2026-03-31 (e não 03-28).
+ * Evita que datas de fechamento/vencimento "encolham" mês a mês depois de um mês curto.
+ */
+export function addMonthsAnchored(key: DateKey, months: number, anchorDay: number): DateKey {
+  const ms = addMonths(`${key.slice(0, 7)}-01`, months);
+  return `${ms.slice(0, 7)}-${String(Math.min(anchorDay, daysInMonth(ms))).padStart(2, '0')}`;
+}
+
 export function diffDays(a: DateKey, b: DateKey): number {
   return Math.round((keyToDate(b).getTime() - keyToDate(a).getTime()) / 86_400_000);
 }
