@@ -12,13 +12,13 @@ import type { PageContext } from '../router';
 import type { Analytics } from '../services/analytics';
 import { calculateCashFlow, calculateProjectedBalance, buildProjectionEvents, lastMonths } from '../services/financialCalculator';
 import { store } from '../state/store';
-import { clearLayout, loadLayout, saveLayout, type DashboardLayout, type WidgetLayout } from '../storage/preferences';
+import { DASHBOARD_LAYOUT_VERSION, clearLayout, loadLayout, saveLayout, type DashboardLayout, type WidgetLayout } from '../storage/preferences';
 import { addDays, monthEnd } from '../utils/dates';
 import { formatDate, formatMoney, formatMonthKeyShort, formatPercent, formatShortDate } from '../utils/format';
 import { openBillsPanel } from './billsOverview';
 import { CLASS_COLOR, analytics, canvasFor, chartFrame, commonHandlers, hasAnyData, instLabel, noDataState, onDataChange, openAddInstitution, tableToggle } from './shared';
 
-const LAYOUT_VERSION = 3;
+const LAYOUT_VERSION = DASHBOARD_LAYOUT_VERSION;
 const GRID_MIN_WIDTH = 1100;
 
 interface WidgetDef {

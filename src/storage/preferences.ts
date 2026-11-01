@@ -98,6 +98,9 @@ export interface WidgetLayout {
   pinned: boolean;
 }
 
+/** Versão atual do layout do dashboard. Layouts de outra versão não são aproveitados (a grade mudou). */
+export const DASHBOARD_LAYOUT_VERSION = 3;
+
 export interface DashboardLayout {
   version: number;
   widgets: WidgetLayout[];
