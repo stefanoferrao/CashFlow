@@ -62,6 +62,10 @@ export class PluggyClient {
   private apiKey: string | null = null;
   private apiKeyExpiresAt = 0;
   private authInFlight: Promise<string> | null = null;
+  /** Muda a cada clearSession: um /auth iniciado antes não pode gravar o apiKey depois do bloqueio. */
+  private sessionGeneration = 0;
+  /** Cliente descartado (bloqueio, troca de credenciais): não faz mais nenhuma chamada de rede. */
+  private disposed = false;
   private readonly inflight = new Map<string, Promise<unknown>>();
   private readonly queue = new ConcurrencyQueue(APP_CONFIG.pluggy.maxConcurrency);
   private readonly fetchImpl: typeof fetch;
@@ -76,10 +80,28 @@ export class PluggyClient {
 
   /** Descarta o apiKey da memória (bloqueio, troca de credenciais, logout). */
   clearSession(): void {
+    this.sessionGeneration++;
     this.apiKey = null;
     this.apiKeyExpiresAt = 0;
     this.authInFlight = null;
     this.inflight.clear();
+  }
+
+  /**
+   * Encerra o cliente de vez. Quem ainda tiver a referência (uma sincronização em andamento)
+   * recebe erro em vez de autenticar de novo e seguir baixando dados depois do bloqueio.
+   */
+  dispose(): void {
+    this.disposed = true;
+    this.clearSession();
+  }
+
+  get isDisposed(): boolean {
+    return this.disposed;
+  }
+
+  private assertActive(): void {
+    if (this.disposed) throw new PluggyError('unknown', { debugDetail: 'Cliente Pluggy descartado (app bloqueado ou credenciais trocadas)' });
   }
 
   hasValidSession(): boolean {
@@ -90,6 +112,8 @@ export class PluggyClient {
   async authenticate(force = false): Promise<string> {
     if (!force && this.hasValidSession() && this.apiKey) return this.apiKey;
     if (this.authInFlight) return this.authInFlight;
+    this.assertActive();
+    const generation = this.sessionGeneration;
     this.authInFlight = (async () => {
       const res = await this.opts.credentials((c) =>
         this.request<{ apiKey: string }>('/auth', {
@@ -99,6 +123,9 @@ export class PluggyClient {
         }),
       );
       if (!res || typeof res.apiKey !== 'string') throw new PluggyError('unknown', { debugDetail: 'Resposta de /auth sem apiKey' });
+      if (generation !== this.sessionGeneration || this.disposed) {
+        throw new PluggyError('unknown', { debugDetail: 'Sessão encerrada enquanto /auth respondia; apiKey descartado' });
+      }
       this.apiKey = res.apiKey;
       // Documentação: o apiKey expira em 2 horas. Usa o `exp` do JWT quando disponível.
       this.apiKeyExpiresAt = jwtExpiryMs(res.apiKey) ?? Date.now() + 2 * 60 * 60 * 1000;
@@ -124,18 +151,22 @@ export class PluggyClient {
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const { method = 'GET', body, auth = true, attempt = 0, reauthed = false } = options;
+    this.assertActive();
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (auth) headers['X-API-KEY'] = await this.authenticate();
 
     const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), APP_CONFIG.pluggy.requestTimeoutMs);
+    // O prazo só começa quando a chamada sai da fila: esperar uma vaga não conta como lentidão da Pluggy.
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     let response: Response;
     try {
-      response = await this.queue.run(() =>
-        this.fetchImpl(url, {
+      response = await this.queue.run(() => {
+        this.assertActive();
+        timer = setTimeout(() => controller.abort(), APP_CONFIG.pluggy.requestTimeoutMs);
+        return this.fetchImpl(url, {
           method,
           headers,
           body: body === undefined ? undefined : JSON.stringify(body),
@@ -143,8 +174,8 @@ export class PluggyClient {
           credentials: 'omit',
           cache: 'no-store',
           referrerPolicy: 'no-referrer',
-        }),
-      );
+        });
+      });
     } catch (e) {
       clearTimeout(timer);
       throw await this.classifyNetworkError(e);

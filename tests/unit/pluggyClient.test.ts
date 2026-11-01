@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PluggyClient, buildNextPath, jwtExpiryMs } from '../../src/pluggy/client';
 import { PluggyError, classifyHttpError, describeItemExecution } from '../../src/pluggy/errors';
 
@@ -154,5 +154,61 @@ describe('classificação de erros', () => {
     expect(describeItemExecution('OUTDATED', 'ERROR').state).toBe('error');
     expect(describeItemExecution('UPDATED', 'SUCCESS').state).toBe('updated');
     expect(describeItemExecution('UPDATED', 'PARTIAL_SUCCESS').message).toBeTruthy();
+  });
+});
+
+describe('PluggyClient: fila, prazo e descarte', () => {
+  it('o prazo de 30 s só conta depois que a chamada sai da fila de concorrência', async () => {
+    vi.useFakeTimers();
+    try {
+      const key = jwt(Math.floor(Date.now() / 1000) + 7200);
+      const fetchImpl = ((url: string, init: RequestInit) => {
+        if (String(url).endsWith('/auth')) return Promise.resolve(json(200, { apiKey: key }));
+        return new Promise<Response>((resolve, reject) => {
+          // Cada chamada leva 20 s: abaixo do prazo, mas 6 chamadas com limite 3 esperam na fila.
+          const t = setTimeout(() => resolve(json(200, { id: 'x' })), 20_000);
+          init.signal?.addEventListener('abort', () => {
+            clearTimeout(t);
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        });
+      }) as unknown as typeof fetch;
+      const c = new PluggyClient({ baseUrl: 'https://api.pluggy.ai', isProxy: false, credentials: creds, fetchImpl });
+      await c.authenticate();
+      const ps = Array.from({ length: 6 }, (_, i) => c.getItem(`i${i}`).then(() => 'ok', (e: PluggyError) => e.kind));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await Promise.all(ps)).toEqual(['ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('/auth que responde depois de clearSession não grava o apiKey', async () => {
+    let releaseAuth: () => void = () => {};
+    const gate = new Promise<void>((r) => (releaseAuth = r));
+    const key = jwt(Math.floor(Date.now() / 1000) + 7200);
+    const { fn } = mockFetch(async (url) => {
+      if (url.endsWith('/auth')) await gate;
+      return json(200, { apiKey: key });
+    });
+    const c = new PluggyClient({ baseUrl: 'https://api.pluggy.ai', isProxy: false, credentials: creds, fetchImpl: fn });
+    const p = c.authenticate();
+    await new Promise((r) => setTimeout(r, 0));
+    c.clearSession();
+    releaseAuth();
+    await expect(p).rejects.toBeInstanceOf(PluggyError);
+    expect(c.hasValidSession()).toBe(false);
+  });
+
+  it('cliente descartado não faz mais chamadas de rede', async () => {
+    const key = jwt(Math.floor(Date.now() / 1000) + 7200);
+    const { fn, calls } = mockFetch((url) => (url.endsWith('/auth') ? json(200, { apiKey: key }) : json(200, { id: 'item1' })));
+    const c = new PluggyClient({ baseUrl: 'https://api.pluggy.ai', isProxy: false, credentials: creds, fetchImpl: fn });
+    await c.getItem('item1');
+    const before = calls.length;
+    c.dispose();
+    await expect(c.getItem('item2')).rejects.toBeInstanceOf(PluggyError);
+    await expect(c.authenticate()).rejects.toBeInstanceOf(PluggyError);
+    expect(calls.length).toBe(before);
   });
 });
