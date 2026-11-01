@@ -208,7 +208,13 @@ function readCategorization(v: unknown, count: { dropped: number }): UserCategor
         count.dropped++;
         continue;
       }
-      uc.rules.push({ id: r.id, contains, category: r.category, subcategory: str(r.subcategory, 40) || null } satisfies CategoryRule);
+      const rule: CategoryRule = { id: r.id, contains, category: r.category, subcategory: str(r.subcategory, 40) || null };
+      if (r.match === 'merchant' || r.match === 'similar') {
+        rule.match = r.match;
+        const label = str(r.label, 60);
+        if (label) rule.label = label;
+      }
+      uc.rules.push(rule);
     }
   }
   if (isRecord(v.customSubcategories)) {

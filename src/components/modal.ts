@@ -115,3 +115,36 @@ export function confirmDialog(opts: { title: string; message: string; confirmLab
     });
   });
 }
+
+/**
+ * Pergunta com duas ou mais respostas (botões). Resolve com o `value` escolhido ou null se o usuário fechar/cancelar.
+ */
+export function choiceDialog(opts: {
+  title: string;
+  message: string;
+  detail?: string;
+  choices: Array<{ value: string; label: string; primary?: boolean }>;
+}): Promise<string | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v: string | null) => {
+      if (done) return;
+      done = true;
+      resolve(v);
+    };
+    const m = openModal({
+      title: opts.title,
+      body: html`<p>${opts.message}</p>${opts.detail ? html`<p class="muted" style="font-size:13px">${opts.detail}</p>` : ''}`,
+      footer: html`<button type="button" class="btn btn--ghost" data-modal-close>Cancelar</button>
+        ${opts.choices.map((c) => html`<button type="button" class="btn ${c.primary ? 'btn--primary' : 'btn--secondary'}" data-choice="${c.value}">${c.label}</button>`)}`,
+      onClose: () => finish(null),
+      initialFocus: '[data-choice]',
+    });
+    m.el.querySelectorAll<HTMLButtonElement>('[data-choice]').forEach((b) =>
+      b.addEventListener('click', () => {
+        finish(b.dataset.choice ?? null);
+        m.close();
+      }),
+    );
+  });
+}

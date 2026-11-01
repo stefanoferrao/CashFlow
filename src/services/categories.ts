@@ -8,6 +8,7 @@
 import type { PluggyCategory } from '../pluggy/types';
 import {
   type AppCategoryId,
+  type CategoryRule,
   type NormalizedTransaction,
   type TransactionKind,
   type UserCategorization,
@@ -174,12 +175,83 @@ export function kindFor(tx: Pick<NormalizedTransaction, 'amount' | 'source'>, ca
 }
 
 /**
- * Aplica regras e ajustes locais. Ordem: ajuste individual > regra (primeira que casar) > categoria da Pluggy.
+ * Descrição sem números, pontuação e termos genéricos (pix, pagamento, de, do…), nas 4 primeiras palavras:
+ * "PIX ENVIADO JOAO DA SILVA 12/03" → "joao silva". Agrupa lançamentos do mesmo estabelecimento/pessoa.
+ */
+export function descriptionKey(description: string): string {
+  return normalizeText(description)
+    .replace(/\d+\/\d+/g, ' ')
+    .replace(/[0-9]+/g, ' ')
+    .replace(/[^a-z ]+/g, ' ')
+    .replace(/\b(pix|ted|doc|transf|transferencia|pagamento|pagto|pag|compra|debito|credito|enviado|recebido|de|da|do|para)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .slice(0, 4)
+    .join(' ');
+}
+
+/** Tamanho máximo do texto de uma regra (o mesmo aceito ao importar personalizações). */
+export const RULE_TEXT_MAX = 60;
+
+const merchantKey = (name: string): string =>
+  normalizeText(name)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .slice(0, RULE_TEXT_MAX)
+    .trim();
+
+const similarKey = (description: string): string => descriptionKey(description).slice(0, RULE_TEXT_MAX).trim();
+
+/** Estabelecimento de uma transação: o informado pela Pluggy ou, sem ele, a descrição sem números e termos genéricos. */
+export interface MerchantRef {
+  match: 'merchant' | 'similar';
+  key: string;
+  /** Nome para mostrar ao usuário. */
+  label: string;
+}
+
+export function merchantOf(tx: Pick<NormalizedTransaction, 'merchant' | 'description'>): MerchantRef | null {
+  const m = tx.merchant?.trim();
+  if (m && merchantKey(m)) return { match: 'merchant', key: merchantKey(m), label: m };
+  const key = similarKey(tx.description);
+  return key.length >= 3 ? { match: 'similar', key, label: tx.description.trim().slice(0, RULE_TEXT_MAX) } : null;
+}
+
+/** A regra vale para esta transação? */
+export function ruleMatches(rule: CategoryRule, tx: Pick<NormalizedTransaction, 'merchant' | 'description'>): boolean {
+  const needle = rule.contains.trim();
+  if (!needle) return false;
+  if (rule.match === 'merchant') return !!tx.merchant && merchantKey(tx.merchant) === needle;
+  if (rule.match === 'similar') return similarKey(tx.description) === needle;
+  const n = normalizeText(needle);
+  if (normalizeText(tx.description).includes(n)) return true;
+  // Regras antigas de "aplicar a futuras" guardavam a descrição já sem termos genéricos ("barbearia ze"),
+  // que não aparece na descrição original ("BARBEARIA DO ZE"): compara também nesse formato.
+  const k = descriptionKey(needle);
+  return k.length >= 3 && k === n && descriptionKey(tx.description).includes(k);
+}
+
+/** Quantas transações uma regra alcança e quantas delas têm ajuste individual (que continua valendo). */
+export function countRuleReach(transactions: NormalizedTransaction[], rule: CategoryRule, uc: UserCategorization): { total: number; keptByOverride: number } {
+  let total = 0;
+  let keptByOverride = 0;
+  for (const tx of transactions) {
+    if (!ruleMatches(rule, tx)) continue;
+    total++;
+    if (uc.overrides[tx.id]?.category) keptByOverride++;
+  }
+  return { total, keptByOverride };
+}
+
+/**
+ * Aplica regras e ajustes locais. Ordem: ajuste individual > regra (a mais recente que casar) > categoria da Pluggy.
  * Retorna NOVOS objetos (não muta o dataset).
  */
 export function applyUserCategorization(transactions: NormalizedTransaction[], uc: UserCategorization): NormalizedTransaction[] {
   if (!uc.rules.length && !Object.keys(uc.overrides).length) return transactions;
-  const rules = uc.rules.map((r) => ({ ...r, needle: normalizeText(r.contains.trim()) })).filter((r) => r.needle.length > 0);
+  // A regra criada por último vence: recategorizar de novo um estabelecimento muda de fato a categoria.
+  const rules = uc.rules.filter((r) => r.contains.trim().length > 0).reverse();
   return transactions.map((tx) => {
     const ov = uc.overrides[tx.id];
     let category = tx.category;
@@ -190,8 +262,7 @@ export function applyUserCategorization(transactions: NormalizedTransaction[], u
       subcategory = ov.subcategory ?? null;
       changed = true;
     } else if (rules.length) {
-      const desc = normalizeText(tx.description);
-      const rule = rules.find((r) => desc.includes(r.needle));
+      const rule = rules.find((r) => ruleMatches(r, tx));
       if (rule) {
         category = rule.category;
         subcategory = rule.subcategory;

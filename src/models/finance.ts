@@ -431,10 +431,20 @@ export interface CategoryOverride {
 
 export interface CategoryRule {
   id: string;
-  /** Texto buscado (sem diferenciar maiúsculas/acentos) na descrição. */
+  /**
+   * Texto da regra. Sem `match`: buscado (sem diferenciar maiúsculas/acentos) na descrição.
+   * Com `match`: a chave do estabelecimento (veja services/categories.ts → merchantOf).
+   */
   contains: string;
   category: AppCategoryId;
   subcategory: string | null;
+  /**
+   * Regra criada a partir de uma transação ("todas deste estabelecimento"):
+   * 'merchant' = mesmo estabelecimento informado pela Pluggy; 'similar' = mesma descrição sem números e termos genéricos.
+   */
+  match?: 'merchant' | 'similar';
+  /** Nome exibido do estabelecimento (regras com `match`). */
+  label?: string;
 }
 
 export interface UserCategorization {

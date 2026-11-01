@@ -56,7 +56,7 @@ async function customize(page: Page) {
   // Datas de fechamento e vencimento do cartão.
   await page.locator(`select[data-change="card-cycle"][data-card="${CARD}"][data-kind="closing"]`).selectOption('25');
   await page.locator(`select[data-change="card-cycle"][data-card="${CARD}"][data-kind="due"]`).selectOption('5');
-  await expect(page.getByText('Datas do cartão salvas')).toBeVisible();
+  await expect(page.getByText('Datas do cartão salvas').first()).toBeVisible();
   // Nome e cor da instituição, nomes da conta e do cartão.
   await page.locator('#set-pluggy [data-action="edit-identity"]').click();
   const dlg = page.locator('.modal');

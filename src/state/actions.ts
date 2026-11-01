@@ -12,6 +12,7 @@ import {
   type ConnectorInfo,
   type InstitutionIdentity,
   type NetWorthSnapshot,
+  type NormalizedTransaction,
   type PlannedEntry,
   type ProductLogo,
   type UserCategorization,
@@ -32,7 +33,7 @@ import * as vault from '../security/vault';
 import { isWebCryptoAvailable } from '../security/crypto';
 import { type IdleLock, createIdleLock, inactivityNotice } from '../security/idleLock';
 import { createLockSync, peerLockNotice } from '../security/lockChannel';
-import { CategoryResolver } from '../services/categories';
+import { CategoryResolver, merchantOf } from '../services/categories';
 import { buildDemoDataset } from '../services/demoData';
 import { createSnapshot, calculateNetWorth, upsertSnapshot } from '../services/financialCalculator';
 import { applyIdentities, sanitizeIdentity, sanitizeProductLogo, toHexColor, validDay } from '../services/institutions';
@@ -1196,6 +1197,30 @@ export async function setTransactionOverride(txId: string, override: CategoryOve
   if (override) overrides[txId] = { ...overrides[txId], ...override };
   else delete overrides[txId];
   await saveCategorization({ ...uc, overrides });
+}
+
+/**
+ * Recategoriza uma transação. `scope`:
+ *  - 'one': só esta (ajuste individual);
+ *  - 'all': todas do mesmo estabelecimento, inclusive as futuras (regra). A regra do mesmo estabelecimento é
+ *    substituída e a nova vence as anteriores; ajustes individuais de OUTRAS transações continuam valendo.
+ */
+export async function categorizeTransaction(
+  tx: Pick<NormalizedTransaction, 'id' | 'merchant' | 'description'>,
+  change: { category: AppCategoryId; subcategory: string | null; ignored: boolean },
+  scope: 'one' | 'all',
+): Promise<void> {
+  const ref = scope === 'all' ? merchantOf(tx) : null;
+  if (!ref) return setTransactionOverride(tx.id, change);
+  const uc = store.state.categorization;
+  const rules = uc.rules.filter((r) => !(r.match === ref.match && r.contains === ref.key));
+  rules.push({ id: uid('rule'), contains: ref.key, match: ref.match, label: ref.label, category: change.category, subcategory: change.subcategory });
+  // Esta transação passa a seguir a regra (sem categoria própria); "ignorar nos cálculos" continua sendo dela.
+  // (Os dados importados nunca chegam ignorados: só o "sim" precisa ficar guardado.)
+  const overrides = { ...uc.overrides };
+  if (change.ignored) overrides[tx.id] = { ignored: true };
+  else delete overrides[tx.id];
+  await saveCategorization({ ...uc, rules, overrides });
 }
 
 export async function addCategoryRule(rule: Omit<CategoryRule, 'id'>): Promise<void> {

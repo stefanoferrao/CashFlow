@@ -11,7 +11,7 @@
  */
 import type { AppCategoryId, NormalizedTransaction } from '../models/finance';
 import { type DateKey, addDays, diffDays } from '../utils/dates';
-import { normalizeText } from './categories';
+import { descriptionKey } from './categories';
 
 export interface Recurrence {
   key: string;
@@ -35,16 +35,7 @@ function median(values: number[]): number {
 
 /** Normaliza a descrição removendo números, datas e ruídos para agrupar lançamentos semelhantes. */
 export function recurrenceKey(description: string): string {
-  return normalizeText(description)
-    .replace(/\d+\/\d+/g, ' ')
-    .replace(/[0-9]+/g, ' ')
-    .replace(/[^a-z ]+/g, ' ')
-    .replace(/\b(pix|ted|doc|transf|transferencia|pagamento|pagto|pag|compra|debito|credito|enviado|recebido|de|da|do|para)\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .slice(0, 4)
-    .join(' ');
+  return descriptionKey(description);
 }
 
 export function detectRecurrences(transactions: NormalizedTransaction[], today: DateKey, lookbackDays = 200): Recurrence[] {
