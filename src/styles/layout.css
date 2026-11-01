@@ -16,11 +16,27 @@
   flex-direction: column;
   gap: var(--s-6);
   padding: var(--s-6) var(--s-4);
-  background: var(--surface);
-  border-right: 1px solid var(--border);
+  background: var(--night);
+  border-right: 1px solid rgba(237, 237, 243, 0.06);
   z-index: 20;
   overflow-y: auto;
   scrollbar-width: thin;
+
+  /* Moldura "night" nos dois temas: os tokens são redefinidos aqui e tudo dentro da barra se ajusta. */
+  color-scheme: dark;
+  --text: var(--on-night);
+  --text-2: var(--on-night-2);
+  --text-3: var(--on-night-3);
+  --surface: var(--night-raised);
+  --surface-2: var(--night-raised);
+  --surface-3: var(--night-raised-2);
+  --surface-inverse: var(--night-raised-2);
+  --border: rgba(237, 237, 243, 0.08);
+  --border-strong: rgba(237, 237, 243, 0.16);
+  --accent-soft: rgba(156, 180, 232, 0.16);
+  --accent-text: var(--periwinkle);
+  --focus: var(--periwinkle);
+  color: var(--text);
 }
 
 .brand {
@@ -48,7 +64,7 @@
   height: 20px;
 }
 .brand__name {
-  font-weight: 700;
+  font-weight: 560;
   font-size: 1.125rem;
   letter-spacing: -0.02em;
 }
@@ -63,7 +79,7 @@
 }
 .nav__section {
   font-size: var(--fs-2xs);
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -76,9 +92,9 @@
   gap: var(--s-3);
   min-height: 42px;
   padding: 0 var(--s-3);
-  border-radius: var(--r-md);
+  border-radius: var(--r-full);
   color: var(--text-2);
-  font-weight: 550;
+  font-weight: 460;
   font-size: var(--fs-md);
   text-decoration: none;
   transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
@@ -112,7 +128,7 @@
   bottom: 10px;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: var(--accent);
+  background: var(--accent-text);
   animation: fade-in var(--t-med) var(--ease);
 }
 
@@ -139,7 +155,7 @@
   line-height: 1.3;
 }
 .conn-pill__text strong {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 /* ---------- Coluna principal ---------- */
@@ -269,7 +285,7 @@
 }
 .demo-banner strong {
   letter-spacing: 0.08em;
-  font-weight: 700;
+  font-weight: 560;
 }
 .demo-banner button {
   border: 1px solid color-mix(in srgb, var(--text-inverse) 35%, transparent);
@@ -278,7 +294,7 @@
   border-radius: var(--r-full);
   padding: 2px 12px;
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 500;
 }
 .demo-banner button:hover {
   background: color-mix(in srgb, var(--text-inverse) 12%, transparent);
@@ -290,7 +306,7 @@
   color: var(--warning);
   font-size: var(--fs-sm);
   text-align: center;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 /* ---------- Navegação inferior (mobile) ---------- */
@@ -419,7 +435,7 @@
   }
   .topbar__title h1 {
     font-size: var(--fs-xl);
-    font-weight: 700;
+    font-weight: 560;
     letter-spacing: -0.02em;
   }
   .topbar .sync-status {
@@ -476,7 +492,7 @@
     background: none;
     color: var(--text-2);
     font-size: var(--fs-2xs);
-    font-weight: 600;
+    font-weight: 500;
     text-decoration: none;
     border-radius: var(--r-md);
     -webkit-tap-highlight-color: transparent;

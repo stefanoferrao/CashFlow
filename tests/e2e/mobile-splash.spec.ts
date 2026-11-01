@@ -101,7 +101,7 @@ test.describe('Tela de carregamento', () => {
     await page.goto('/', { waitUntil: 'commit' });
     await expect(page.locator('#splash')).toBeVisible();
     const bg = await page.locator('#splash').evaluate((el) => getComputedStyle(el).backgroundColor);
-    expect(bg).toBe('rgb(15, 17, 21)');
+    expect(bg).toBe('rgb(23, 23, 33)');
   });
 
   test('ao reabrir o app no modo demonstração, entra pelo carregamento e chega ao dashboard', async ({ page }) => {

@@ -1,4 +1,4 @@
-import '@fontsource-variable/dm-sans';
+import '@fontsource-variable/inter';
 import 'gridstack/dist/gridstack.min.css';
 import './styles/tokens.css';
 import './styles/base.css';
